@@ -2388,6 +2388,10 @@ public class NfcService implements DeviceHostListener {
             return true;
         }
 
+      public IBinder getNfcAdapterVendorInterface(String vendor) {
+              return null;
+        }
+
         @Override
         public void pausePolling(int timeoutInMs) {
             NfcPermissions.enforceAdminPermissions(mContext);
