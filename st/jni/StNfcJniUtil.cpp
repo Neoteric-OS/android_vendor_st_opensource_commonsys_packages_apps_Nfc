@@ -50,8 +50,10 @@ jint JNI_OnLoad(JavaVM* jvm, void*) {
   // Check JNI version
   if (jvm->GetEnv((void**)&e, JNI_VERSION_1_6)) return JNI_ERR;
 
-  if (android::register_com_android_nfc_stNativeNfcManager(e) == -1)
+  if (android::register_com_android_nfc_stNativeNfcManager(e) == -1){
+    LOG(INFO) << StringPrintf("NFC Service: if loading nci JNI");
     return JNI_ERR;
+  }
   if (android::register_com_android_nfc_NativeLlcpServiceSocket(e) == -1)
     return JNI_ERR;
   if (android::register_com_android_nfc_NativeLlcpSocket(e) == -1)
@@ -70,6 +72,7 @@ jint JNI_OnLoad(JavaVM* jvm, void*) {
   if (StRoutingManager::getInstance().registerJniFunctions(e) == -1)
     return JNI_ERR;
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", __func__);
+  LOG(INFO) << StringPrintf("NFC Service: exit nci JNI");
   return JNI_VERSION_1_6;
 }
 

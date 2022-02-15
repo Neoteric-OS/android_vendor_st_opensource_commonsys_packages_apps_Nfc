@@ -2458,7 +2458,7 @@ int StRoutingManager::registerJniFunctions(JNIEnv* e) {
   static const char fn[] = "StRoutingManager::registerJniFunctions";
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", fn);
   return jniRegisterNativeMethods(
-      e, "com/android/nfc/cardemulation/AidRoutingManager", sMethods,
+      e, "com/android/nfcstm/cardemulation/AidRoutingManager", sMethods,
       NELEM(sMethods));
 }
 

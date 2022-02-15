@@ -35,7 +35,7 @@ extern bool nfc_debug_enabled;
 namespace android {
 const char* JNISTDTAVersion = "JNI ST DTA version 00.01";
 const char* gNativeNfcStDtaExtensionsClassName =
-    "com/android/nfc/dhimpl/NativeNfcStDtaExtensions";
+    "com/android/nfcstm/dhimpl/NativeNfcStDtaExtensions";
 
 jmethodID gCachedNativeNfcStDtaExtensionsNotifyListeners;
 

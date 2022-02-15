@@ -101,16 +101,16 @@ jmethodID gCachedNfcManagerNotifyRfFieldDeactivated;
 jmethodID gCachedNfcManagerNotifyEeUpdated;
 jmethodID gCachedNfcManagerNotifyHwErrorReported;
 const char* gNativeP2pDeviceClassName =
-    "com/android/nfc/dhimpl/NativeP2pDevice";
+    "com/android/nfcstm/dhimpl/NativeP2pDevice";
 const char* gNativeLlcpServiceSocketClassName =
-    "com/android/nfc/dhimpl/NativeLlcpServiceSocket";
+    "com/android/nfcstm/dhimpl/NativeLlcpServiceSocket";
 const char* gNativeLlcpConnectionlessSocketClassName =
-    "com/android/nfc/dhimpl/NativeLlcpConnectionlessSocket";
+    "com/android/nfcstm/dhimpl/NativeLlcpConnectionlessSocket";
 const char* gNativeLlcpSocketClassName =
-    "com/android/nfc/dhimpl/NativeLlcpSocket";
-const char* gNativeNfcTagClassName = "com/android/nfc/dhimpl/NativeNfcTag";
+    "com/android/nfcstm/dhimpl/NativeLlcpSocket";
+const char* gNativeNfcTagClassName = "com/android/nfcstm/dhimpl/NativeNfcTag";
 const char* gNativeNfcManagerClassName =
-    "com/android/nfc/dhimpl/NativeNfcManager";
+    "com/android/nfcstm/dhimpl/NativeNfcManager";
 void doStartupConfig();
 void startStopPolling(bool isStartPolling);
 void startRfDiscovery(bool isStart);
@@ -673,16 +673,16 @@ static jboolean nfcManager_initNativeStruc(JNIEnv* e, jobject o) {
   /* Initialize native cached references */
   gCachedNfcManagerNotifyNdefMessageListeners =
       e->GetMethodID(cls.get(), "notifyNdefMessageListeners",
-                     "(Lcom/android/nfc/dhimpl/NativeNfcTag;)V");
+                     "(Lcom/android/nfcstm/dhimpl/NativeNfcTag;)V");
   gCachedNfcManagerNotifyLlcpLinkActivation =
       e->GetMethodID(cls.get(), "notifyLlcpLinkActivation",
-                     "(Lcom/android/nfc/dhimpl/NativeP2pDevice;)V");
+                     "(Lcom/android/nfcstm/dhimpl/NativeP2pDevice;)V");
   gCachedNfcManagerNotifyLlcpLinkDeactivated =
       e->GetMethodID(cls.get(), "notifyLlcpLinkDeactivated",
-                     "(Lcom/android/nfc/dhimpl/NativeP2pDevice;)V");
+                     "(Lcom/android/nfcstm/dhimpl/NativeP2pDevice;)V");
   gCachedNfcManagerNotifyLlcpFirstPacketReceived =
       e->GetMethodID(cls.get(), "notifyLlcpLinkFirstPacketReceived",
-                     "(Lcom/android/nfc/dhimpl/NativeP2pDevice;)V");
+                     "(Lcom/android/nfcstm/dhimpl/NativeP2pDevice;)V");
 
   gCachedNfcManagerNotifyHostEmuActivated =
       e->GetMethodID(cls.get(), "notifyHostEmuActivated", "(I)V");
@@ -2153,15 +2153,15 @@ static JNINativeMethod gMethods[] = {
     {"doActivateLlcp", "()Z", (void*)nfcManager_doActivateLlcp},
 
     {"doCreateLlcpConnectionlessSocket",
-     "(ILjava/lang/String;)Lcom/android/nfc/dhimpl/"
+     "(ILjava/lang/String;)Lcom/android/nfcstm/dhimpl/"
      "NativeLlcpConnectionlessSocket;",
      (void*)nfcManager_doCreateLlcpConnectionlessSocket},
 
     {"doCreateLlcpServiceSocket",
-     "(ILjava/lang/String;III)Lcom/android/nfc/dhimpl/NativeLlcpServiceSocket;",
+     "(ILjava/lang/String;III)Lcom/android/nfcstm/dhimpl/NativeLlcpServiceSocket;",
      (void*)nfcManager_doCreateLlcpServiceSocket},
 
-    {"doCreateLlcpSocket", "(IIII)Lcom/android/nfc/dhimpl/NativeLlcpSocket;",
+    {"doCreateLlcpSocket", "(IIII)Lcom/android/nfcstm/dhimpl/NativeLlcpSocket;",
      (void*)nfcManager_doCreateLlcpSocket},
 
     {"doGetLastError", "()I", (void*)nfcManager_doGetLastError},
