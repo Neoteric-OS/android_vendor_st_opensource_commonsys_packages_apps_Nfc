@@ -2,6 +2,7 @@ package com.android.nfcstm.beam;
 
 import android.app.Service;
 import android.bluetooth.BluetoothAdapter;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Handler;
 import android.os.IBinder;
@@ -92,7 +93,8 @@ public class BeamReceiveService extends Service implements BeamTransferManager.C
                 mBeamStatusReceiver,
                 mBeamStatusReceiver.getIntentFilter(),
                 BeamStatusReceiver.BEAM_STATUS_PERMISSION,
-                new Handler());
+                new Handler(),
+                Context.RECEIVER_EXPORTED);
 
         mTransferManager.start();
         mTransferManager.updateNotification();

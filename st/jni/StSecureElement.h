@@ -36,9 +36,7 @@ typedef struct {
 
 typedef struct {
   uint8_t id;
-  /* NCI 2.0 - Begin */
   uint8_t nfceeId;
-  /* NCI 2.0 - End */
   bool connected;
 } tSE;
 
@@ -213,19 +211,12 @@ class StSecureElement {
   ** Returns:         True if ok.
   **
   *******************************************************************************/
-  /* NCI 2.0 - Begin */
   bool EnableSE(int seID, bool enable);
-  /* NCI 2.0 - End */
-
   void SeActivationLock();
   void SeActivationUnlock();
-
-  /* NCI 2.0 - Begin */
   int retrieveHostList(uint8_t* ptrHostList, uint8_t* ptrInfo);
   void resetEEInfo();
-
   uint8_t getSENfceeId(uint8_t host_id);
-  /* NCI 2.0 - End */
 
   static const uint8_t UICC_IDX = 0x00;
   static const uint8_t ESE_IDX = 0x01;
@@ -234,9 +225,7 @@ class StSecureElement {
   static const unsigned int MAX_RESPONSE_SIZE = 1024;
   //    enum RouteSelection {NoRoute, DefaultRoute, SecElemRoute};
   enum RxEvtType { EvtTransmitData, EvtWtxRequest };
-  /* NCI 2.0 - Begin */
   static const int MAX_NUM_EE = 4;  // max number of EE's
-  /* NCI 2.0 - End */
   static StSecureElement sSecElem;
   static const char* APP_NAME;
 
@@ -245,9 +234,7 @@ class StSecureElement {
   static const uint8_t EVT_TRANSMIT_DATA = 0x10;
   static const uint8_t ESE_ATR_REG_IDX = 0x01;
   static const uint8_t INVALID_BWI = 0xFF;
-  /* NCI 2.0 - Begin */
   static const uint8_t EVT_ATR = 0x12;
-  /* NCI 2.0 - End */
   static const uint16_t DEFAULT_TX_WAITING_TIME = 5000;
 
   static const uint8_t UICC_ID = 0x02;
@@ -257,10 +244,9 @@ class StSecureElement {
   static const uint8_t ESE_GSMA_ID = 0x01;
   static const uint8_t UICC_GSMA_ID = 0x02;
   static const uint8_t EVT_WTX_REQUEST = 0x11;
-  /* NCI 2.0 - Begin */
+
   static const tNFA_HANDLE ESE_HANDLE1 = 0x482;
   static const tNFA_HANDLE ESE_HANDLE2 = 0x484;
-  /* NCI 2.0 - End */
 
   static const uint8_t HOT_PLUG_MASK = 0x1;
   static const uint8_t SE_INHIBITED_MASK = 0x2;
@@ -287,22 +273,16 @@ class StSecureElement {
   SyncEvent mEeSetModeEvent;
   SyncEvent mUiccListenEvent;
   SyncEvent mTransceiveEvent;
-
   SyncEvent mHotPlugEvent;
   SyncEvent mHostListEvent;
   SyncEvent mApduInfoEvent;
   SyncEvent mApduReadAtrEvent;
 
-  /* NCI 2.0 - Begin */
   SyncEvent mPowerCtrlEvent;
-  /* NCI 2.0 - End */
 
   SyncEvent mSeActivationEvent;
-
-  /* NCI 2.0 - Begin */
   SyncEvent mCreatePipeEvent;
   SyncEvent mOpenPipeEvent;
-  /* NCI 2.0 - End */
 
   uint8_t mResponseData[MAX_RESPONSE_SIZE];
   uint8_t mAidForEmptySelect[NCI_MAX_AID_LEN + 1];
@@ -314,9 +294,7 @@ class StSecureElement {
   uint16_t mTxWaitingTime;
   uint8_t mBwi;
   uint8_t mEseApduPipeId;
-  /* NCI 2.0 - Begin */
   uint8_t mEseApduGateId;
-  /* NCI 2.0 - End */
 
   uint8_t mRxEvtType;
   bool mEeModeSet;

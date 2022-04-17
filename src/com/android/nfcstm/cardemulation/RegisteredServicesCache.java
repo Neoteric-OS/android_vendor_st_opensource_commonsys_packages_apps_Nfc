@@ -48,12 +48,15 @@ import android.net.Uri;
 import android.nfc.cardemulation.CardEmulation;
 import android.nfc.cardemulation.HostApduService;
 import android.nfc.cardemulation.OffHostApduService;
+import android.os.SystemProperties;
 import android.os.UserHandle;
+import android.os.UserManager;
 import android.util.AtomicFile;
 import android.util.Log;
 import android.util.SparseArray;
 import android.util.Xml;
 import android.util.proto.ProtoOutputStream;
+import com.android.internal.annotations.GuardedBy;
 import com.android.internal.util.FastXmlSerializer;
 import com.android.nfcstm.NfcService;
 import com.google.android.collect.Maps;
@@ -87,9 +90,7 @@ public class RegisteredServicesCache {
     static final String XML_INDENT_OUTPUT_FEATURE =
             "http://xmlpull.org/v1/doc/features.html#indent-output";
     static final String TAG = "HCENfc_RegisteredServicesCache";
-    static final boolean DBG = true;
-    static final boolean DBG2 =
-            DBG && android.os.SystemProperties.get("persist.st_nfc_debug").equals("1");
+    static final boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
     static final String SERVICE_STATE_FILE_VERSION = "1.0";
 
     final Context mContext;
@@ -97,6 +98,10 @@ public class RegisteredServicesCache {
 
     final Object mLock = new Object();
     // All variables below synchronized on mLock
+
+    // mUserHandles holds the UserHandles of all the profiles that belong to current user
+    @GuardedBy("mLock")
+    List<UserHandle> mUserHandles;
 
     // mUserServices holds the card emulation services that are running for each user
     final SparseArray<UserServices> mUserServices = new SparseArray<UserServices>();
@@ -135,23 +140,31 @@ public class RegisteredServicesCache {
     };
 
     private UserServices findOrCreateUserLocked(int userId) {
-
-        if (DBG) Log.d(TAG, "findOrCreateUserLocked()");
-
         UserServices services = mUserServices.get(userId);
         if (services == null) {
+            if (DBG) Log.d(TAG, "findOrCreateUserLocked() - No services found yet, creating");
+
             services = new UserServices();
             mUserServices.put(userId, services);
         }
         return services;
     }
 
-    public RegisteredServicesCache(Context context, Callback callback) {
+    private int getProfileParentId(int userId) {
+        UserManager um =
+                mContext.createContextAsUser(UserHandle.of(userId), /*flags=*/ 0)
+                        .getSystemService(UserManager.class);
+        UserHandle uh = um.getProfileParent(UserHandle.of(userId));
+        return uh == null ? userId : uh.getIdentifier();
+    }
 
+    public RegisteredServicesCache(Context context, Callback callback) {
         if (DBG) Log.d(TAG, "constructor");
 
         mContext = context;
         mCallback = callback;
+
+        refreshUserProfilesLocked();
 
         final BroadcastReceiver receiver =
                 new BroadcastReceiver() {
@@ -177,7 +190,7 @@ public class RegisteredServicesCache {
                                                             action));
                             if (!replaced) {
                                 int currentUser = ActivityManager.getCurrentUser();
-                                if (currentUser == UserHandle.getUserId(uid)) {
+                                if (currentUser == getProfileParentId(UserHandle.getUserId(uid))) {
                                     invalidateCache(UserHandle.getUserId(uid));
                                 } else {
                                     // Cache will automatically be updated on user switch
@@ -186,7 +199,7 @@ public class RegisteredServicesCache {
                                 if (DBG)
                                     Log.d(
                                             TAG,
-                                            "Ignoring package intent due to package being replaced.");
+                                            "onReceive() - Ignoring package intent due to package being replaced.");
                             }
                         }
                     }
@@ -215,25 +228,52 @@ public class RegisteredServicesCache {
     }
 
     void initialize() {
-
         if (DBG) Log.d(TAG, "initialize()");
 
         synchronized (mLock) {
             readDynamicSettingsLocked();
+            for (UserHandle uh : mUserHandles) {
+                invalidateCache(uh.getIdentifier());
+            }
         }
-        invalidateCache(ActivityManager.getCurrentUser());
+    }
+
+    public void onUserSwitched() {
+        synchronized (mLock) {
+            refreshUserProfilesLocked();
+        }
+    }
+
+    public void onManagedProfileChanged() {
+        synchronized (mLock) {
+            refreshUserProfilesLocked();
+        }
+    }
+
+    private void refreshUserProfilesLocked() {
+        UserManager um =
+                mContext.createContextAsUser(
+                                UserHandle.of(ActivityManager.getCurrentUser()), /*flags=*/ 0)
+                        .getSystemService(UserManager.class);
+        mUserHandles = um.getEnabledProfiles();
+        List<UserHandle> removeUserHandles = new ArrayList<UserHandle>();
+
+        for (UserHandle uh : mUserHandles) {
+            if (um.isQuietModeEnabled(uh)) {
+                removeUserHandles.add(uh);
+            }
+        }
+        mUserHandles.removeAll(removeUserHandles);
     }
 
     void dump(ArrayList<StApduServiceInfo> services) {
         for (StApduServiceInfo service : services) {
-            if (DBG2) Log.d(TAG, service.toString());
+            if (DBG) Log.d(TAG, service.toString());
         }
     }
 
     boolean containsStServiceLocked(
             ArrayList<StApduServiceInfo> services, ComponentName serviceName) {
-
-        if (DBG) Log.d(TAG, "containsStServiceLocked()");
 
         for (StApduServiceInfo service : services) {
             if (service.getComponent().equals(serviceName)) return true;
@@ -242,16 +282,10 @@ public class RegisteredServicesCache {
     }
 
     public boolean hasService(int userId, ComponentName service) {
-
-        if (DBG) Log.d(TAG, "hasService()");
-
         return getStService(userId, service) != null;
     }
 
     public StApduServiceInfo getStService(int userId, ComponentName service) {
-
-        if (DBG) Log.d(TAG, "getStService()");
-
         synchronized (mLock) {
             UserServices userServices = findOrCreateUserLocked(userId);
             return userServices.services.get(service);
@@ -259,19 +293,19 @@ public class RegisteredServicesCache {
     }
 
     public List<StApduServiceInfo> getStServices(int userId) {
-
-        if (DBG) Log.d(TAG, "getStServices()");
-
         final ArrayList<StApduServiceInfo> services = new ArrayList<StApduServiceInfo>();
         synchronized (mLock) {
             UserServices userServices = findOrCreateUserLocked(userId);
+
+            if (DBG)
+                Log.d(TAG, "getStServices() - Nb services found: " + userServices.services.size());
+
             services.addAll(userServices.services.values());
         }
         return services;
     }
 
     public List<StApduServiceInfo> getStServicesForCategory(int userId, String category) {
-
         final ArrayList<StApduServiceInfo> services = new ArrayList<StApduServiceInfo>();
         synchronized (mLock) {
             UserServices userServices = findOrCreateUserLocked(userId);
@@ -288,16 +322,13 @@ public class RegisteredServicesCache {
     }
 
     ArrayList<StApduServiceInfo> getInstalledStServices(int userId) {
-
-        if (DBG) Log.d(TAG, "getInstalledServices()");
-
         PackageManager pm;
         try {
             pm =
                     mContext.createPackageContextAsUser("android", 0, new UserHandle(userId))
                             .getPackageManager();
         } catch (NameNotFoundException e) {
-            Log.e(TAG, "Could not create user package context");
+            Log.e(TAG, "getInstalledStServices() - Could not create user package context");
             return null;
         }
 
@@ -379,7 +410,6 @@ public class RegisteredServicesCache {
     }
 
     public void invalidateCache(int userId) {
-
         if (DBG) Log.d(TAG, "invalidateCache()");
 
         final ArrayList<StApduServiceInfo> validServices = getInstalledStServices(userId);
@@ -408,7 +438,7 @@ public class RegisteredServicesCache {
             /* Fill services entry */
             /** *************************** */
             for (StApduServiceInfo service : validServices) {
-                if (DBG2)
+                if (DBG)
                     Log.d(
                             TAG,
                             "invalidateCache() - Adding service: "
@@ -469,11 +499,6 @@ public class RegisteredServicesCache {
             /* Update service states */
             /** *************************** */
             updateServiceStateFromFile(userId);
-            Log.d(
-                    TAG,
-                    "invalidateCache() - 1 "
-                            + Thread.currentThread().getStackTrace()[2].getMethodName()
-                            + ": WriteServiceStateToFile");
             writeServiceStateToFile(userId);
         }
 
@@ -482,9 +507,6 @@ public class RegisteredServicesCache {
     }
 
     private void readDynamicSettingsLocked() {
-
-        if (DBG) Log.d(TAG, "readDynamicSettingsLocked()");
-
         FileInputStream fis = null;
         try {
             if (!mDynamicSettingsFile.getBaseFile().exists()) {
@@ -553,6 +575,11 @@ public class RegisteredServicesCache {
                                 }
                                 dynSettings.offHostSE = currentOffHostSE;
                                 UserServices services = findOrCreateUserLocked(userId);
+                                if (DBG)
+                                    Log.d(
+                                            TAG,
+                                            "readDynamicSettingsLocked() - Found componentName: "
+                                                    + currentComponent.flattenToString());
                                 services.dynamicSettings.put(currentComponent, dynSettings);
                             }
                             currentUid = -1;
@@ -582,7 +609,6 @@ public class RegisteredServicesCache {
     }
 
     private boolean writeDynamicSettingsLocked() {
-
         if (DBG) Log.d(TAG, "writeDynamicSettingsLocked()");
 
         FileOutputStream fos = null;
@@ -728,13 +754,10 @@ public class RegisteredServicesCache {
     }
 
     private void updateServiceStateFromFile(int currUserId) {
-
-        if (DBG) Log.d(TAG, "updateServiceStateFromFile()");
-
         FileInputStream fis = null;
         try {
             if (!mServiceStateFile.getBaseFile().exists()) {
-                Log.d(TAG, "updateServiceStateFromFile()() - mServiceStateFile does not exist");
+                Log.d(TAG, "updateServiceStateFromFile() - mServiceStateFile does not exist");
                 return;
             }
             fis = mServiceStateFile.openRead();
@@ -767,8 +790,8 @@ public class RegisteredServicesCache {
                     eventType = parser.next();
                 }
                 tagName = parser.getName();
-                Log.d(TAG, "Next Tag=" + tagName);
             }
+
             if ("services".equals(tagName)) {
                 while (eventType != XmlPullParser.END_DOCUMENT) {
                     tagName = parser.getName();
@@ -833,6 +856,11 @@ public class RegisteredServicesCache {
                         if ("service".equals(tagName)) {
                             final int userId = UserHandle.getUserId(currUid);
 
+                            Log.d(
+                                    TAG,
+                                    "updateServiceStateFromFile() - component: "
+                                            + currComponent.flattenToString());
+
                             UserServices serviceCache = findOrCreateUserLocked(userId);
                             StApduServiceInfo serviceInfo =
                                     serviceCache.services.get(currComponent);
@@ -867,8 +895,6 @@ public class RegisteredServicesCache {
 
     private boolean writeServiceStateToFile(int currUserId) {
         FileOutputStream fos = null;
-
-        if (DBG) Log.d(TAG, "writeServiceStateToFile()");
 
         if (currUserId != ActivityManager.getCurrentUser()) {
             return false;
@@ -936,7 +962,6 @@ public class RegisteredServicesCache {
     }
 
     public int updateServiceState(int userId, int uid, Map<String, Boolean> serviceState) {
-
         if (DBG) Log.d(TAG, "updateServiceState()");
 
         boolean success = false;
@@ -971,7 +996,6 @@ public class RegisteredServicesCache {
 
     public boolean registerAidGroupForService(
             int userId, int uid, ComponentName componentName, StAidGroup stAidGroup) {
-
         if (DBG)
             Log.d(
                     TAG,
@@ -1057,8 +1081,10 @@ public class RegisteredServicesCache {
 
     public StAidGroup getAidGroupForService(
             int userId, int uid, ComponentName componentName, String category) {
-
-        if (DBG) Log.d(TAG, "getAidGroupForService()");
+        if (DBG)
+            Log.d(
+                    TAG,
+                    "getAidGroupForService() - componentName: " + componentName.flattenToString());
 
         StApduServiceInfo serviceInfo = getStService(userId, componentName);
         if (serviceInfo != null) {
@@ -1075,7 +1101,6 @@ public class RegisteredServicesCache {
 
     public boolean removeAidGroupForService(
             int userId, int uid, ComponentName componentName, String category) {
-
         if (DBG) Log.d(TAG, "removeAidGroupForService()");
 
         boolean success = false;
@@ -1132,20 +1157,28 @@ public class RegisteredServicesCache {
     }
 
     public void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
-        pw.println("HCENfc_RegsiteredServicesCache - Registered HCE services for current user: ");
-        UserServices userServices = findOrCreateUserLocked(ActivityManager.getCurrentUser());
-        for (StApduServiceInfo service : userServices.services.values()) {
-            service.dump(fd, pw, args);
-            pw.println("");
+        pw.println("HCENfc_RegisteredServicesCache - Registered HCE services for current user: ");
+
+        synchronized (mLock) {
+            for (UserHandle uh : mUserHandles) {
+                UserManager um =
+                        mContext.createContextAsUser(uh, /*flags=*/ 0)
+                                .getSystemService(UserManager.class);
+                pw.println("User " + um.getUserName() + " : ");
+                UserServices userServices = findOrCreateUserLocked(uh.getIdentifier());
+                for (StApduServiceInfo service : userServices.services.values()) {
+                    service.dump(fd, pw, args);
+                    pw.println("");
+                }
+                pw.println("");
+            }
         }
-        pw.println("");
     }
 
     public void updateStatusOfServices(boolean commitStatus) {
-
         if (DBG) Log.d(TAG, "updateStatusOfServices() - commitStatus: " + commitStatus);
 
-        final UserServices userServices = mUserServices.get(ActivityManager.getCurrentUser());
+        final UserServices userServices = findOrCreateUserLocked(ActivityManager.getCurrentUser());
 
         if (userServices.services.size() > 0) {
             /* update for AID based services */
@@ -1156,11 +1189,6 @@ public class RegisteredServicesCache {
                 serviceInfo.updateServiceCommitStatus(CardEmulation.CATEGORY_OTHER, commitStatus);
             }
 
-            Log.d(
-                    TAG,
-                    "updateStatusOfServices() - 3 "
-                            + Thread.currentThread().getStackTrace()[2].getMethodName()
-                            + ": WriteServiceStateToFile");
             writeServiceStateToFile(ActivityManager.getCurrentUser());
         } else {
             if (DBG) Log.d(TAG, "updateStatusOfServices() - No registered services");

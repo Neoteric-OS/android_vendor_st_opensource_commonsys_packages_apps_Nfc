@@ -49,7 +49,8 @@ int register_com_android_nfc_stNativeNfcSecureElement(JNIEnv* e);
 int register_com_android_nfc_NativeNfcStExtensions(JNIEnv* e);
 
 extern jmethodID gCachedNfcManagerNotifyDefaultRoutesSet;
-extern jmethodID gCachedNfcManagerNotifyESEUnrecoverable;
+extern jmethodID gCachedNfcManagerNotifyHwErrorReported;
+;
 
 /* Proprietary logging feature */
 extern jmethodID gCachedNfcManagerNotifyStLogData;
@@ -57,4 +58,6 @@ extern jmethodID gCachedNfcManagerNotifyActionNtf;
 extern jmethodID gCachedNfcManagerNotifyIntfActivatedNtf;
 extern jmethodID gCachedNfcManagerNotifyRawAuthStatus;
 extern jmethodID gCachedNfcManagerNotifyDetectionFOD;
+
+extern jmethodID gCachedNfcManagerNotifyPollingLoopData;
 }  // namespace android

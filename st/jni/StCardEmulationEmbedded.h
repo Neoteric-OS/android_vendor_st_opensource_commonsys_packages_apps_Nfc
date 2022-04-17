@@ -90,9 +90,7 @@ class StCardEmulationEmbedded {
 
   SyncEvent mEeRegisterEvent;
   SyncEvent mEeSetModeEvent;
-  /* NCI 2.0 - Begin */
   SyncEvent mEeSetModeNtfEvent;
-  /* NCI 2.0 - End */
   SyncEvent mEeCreateConnEvent;
   SyncEvent mEeDataEvent;
   SyncEvent mEeDisconnEvent;

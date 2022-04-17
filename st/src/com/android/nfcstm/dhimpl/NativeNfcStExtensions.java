@@ -53,8 +53,6 @@ public class NativeNfcStExtensions {
 
     public native byte[] getHWVersion();
 
-    public native byte[] getSWVersion();
-
     public native int loopback();
 
     public native int getHceUserProp();
@@ -96,7 +94,6 @@ public class NativeNfcStExtensions {
 
     public native void disconnectGate(int pipe_id);
 
-    /* NCI 2.0 - Begin */
     public native void setNciConfig(int param_id, byte[] param, int length);
 
     public native byte[] getNciConfig(int param_id);

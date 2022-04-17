@@ -141,7 +141,7 @@ public class StNativeNfcManager implements StDeviceHost {
 
     public native void stopforceRouting();
 
-    public native void NfceeDiscover();
+    public native void nfceeDiscover();
 
     @Override
     public native boolean commitRouting();
@@ -349,6 +349,8 @@ public class StNativeNfcManager implements StDeviceHost {
 
     public native int getAidTableSize();
 
+    public native int getRemainingAidTableSize();
+
     private native void doSetP2pInitiatorModes(int modes);
 
     @Override
@@ -427,6 +429,12 @@ public class StNativeNfcManager implements StDeviceHost {
         doSetNfceePowerAndLinkCtrl(enable);
     }
 
+    @Override
+    public native byte[] getRoutingTable();
+
+    @Override
+    public native int getMaxRoutingTableSize();
+
     /** Notifies Ndef Message (TODO: rename into notifyTargetDiscovered) */
     private void notifyNdefMessageListeners(StNativeNfcTag tag) {
         mListener.onRemoteEndpointDiscovered(tag);
@@ -490,10 +498,6 @@ public class StNativeNfcManager implements StDeviceHost {
                 aidRoute, mifareRoute, isoDepRoute, felicaRoute, abTechRoute, scRoute);
     }
 
-    private void notifyESEUnrecoverable() {
-        mListener.onESEUnrecoverableError();
-    }
-
     private void notifyDetectionFOD(int FodReason) {
         mListener.onDetectionFOD(FodReason);
     }
@@ -549,5 +553,11 @@ public class StNativeNfcManager implements StDeviceHost {
 
     private void notifyIntfActivatedNtf(byte[] data) {
         mListener.onIntfActivatedNtfReceived(data);
+    }
+
+    public native void enablePollingLoopSpy(boolean enabled);
+
+    private void notifyPollingLoopData(String data) {
+        mListener.onPollingLoopData(data);
     }
 }

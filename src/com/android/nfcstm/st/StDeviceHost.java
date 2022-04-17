@@ -35,7 +35,7 @@ public interface StDeviceHost extends DeviceHost {
 
     public void stopforceRouting();
 
-    public void NfceeDiscover();
+    public void nfceeDiscover();
 
     boolean doSetMuteTech(boolean muteA, boolean muteB, boolean muteF, boolean commitNeeded);
 
@@ -66,4 +66,8 @@ public interface StDeviceHost extends DeviceHost {
     boolean isMultiTag();
 
     void enableIntfActivatedNtf(boolean enabled);
+
+    void enablePollingLoopSpy(boolean enabled);
+
+    int getRemainingAidTableSize();
 }

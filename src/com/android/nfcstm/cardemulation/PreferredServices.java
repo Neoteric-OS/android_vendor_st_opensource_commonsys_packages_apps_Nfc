@@ -43,7 +43,9 @@ import android.net.Uri;
 import android.nfc.cardemulation.CardEmulation;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemProperties;
 import android.os.UserHandle;
+import android.os.UserManager;
 import android.provider.Settings;
 import android.provider.Settings.SettingNotFoundException;
 import android.util.Log;
@@ -68,9 +70,7 @@ import java.util.List;
  */
 public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Callback {
     static final String TAG = "HCENfc_PreferredServices";
-    static final boolean DBG = true;
-    static final boolean DBG2 =
-            DBG && android.os.SystemProperties.get("persist.st_nfc_debug").equals("1");
+    static final boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
 
     static final Uri paymentDefaultUri =
             Settings.Secure.getUriFor(Settings.Secure.NFC_PAYMENT_DEFAULT_COMPONENT);
@@ -89,6 +89,7 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
         boolean preferForeground; // The current selection mode for this category
         ComponentName settingsDefault; // The component preferred in settings (eg Tap&Pay)
         ComponentName currentPreferred; // The computed preferred component
+        UserHandle mUserHandle;
     }
 
     final Object mLock = new Object();
@@ -99,16 +100,19 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
     int mForegroundUid; // The UID of the fg app, or -1 if fg app didn't request
 
     ComponentName mNextTapDefault; // The component preferred by active disambig dialog
+    int mNextTapDefaultUserId;
     boolean mClearNextTapDefault = false; // Set when the next tap default must be cleared
 
     ComponentName mForegroundCurrent; // The currently computed foreground component
+    int mForegroundCurrentUid; // The UID of the currently computed foreground component
 
     boolean mIsPendingOverflowResolution = false;
 
     public interface Callback {
-        void onPreferredPaymentServiceChanged(ComponentName service);
-
-        void onPreferredForegroundServiceChanged(ComponentName service);
+        /** Notify when preferred payment service is changed */
+        void onPreferredPaymentServiceChanged(int userId, ComponentName service);
+        /** Notify when preferred foreground service is changed */
+        void onPreferredForegroundServiceChanged(int userId, ComponentName service);
     }
 
     public PreferredServices(
@@ -116,7 +120,6 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
             RegisteredServicesCache serviceCache,
             RegisteredAidCache aidCache,
             Callback callback) {
-
         if (DBG) Log.d(TAG, "constructor");
 
         mContext = context;
@@ -133,7 +136,7 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                         paymentForegroundUri, true, mSettingsObserver, UserHandle.USER_ALL);
 
         // Load current settings defaults for payments
-        loadDefaultsFromSettings(ActivityManager.getCurrentUser());
+        loadDefaultsFromSettings(ActivityManager.getCurrentUser(), false);
     }
 
     private final class SettingsObserver extends ContentObserver {
@@ -153,21 +156,14 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
             // a change made for another user, we'll sync it down
             // on user switch.
             int currentUser = ActivityManager.getCurrentUser();
-            loadDefaultsFromSettings(currentUser);
+            loadDefaultsFromSettings(currentUser, false);
         }
     };
 
-    void loadDefaultsFromSettings(int userId) {
+    void loadDefaultsFromSettings(int userId, boolean force) {
         boolean paymentDefaultChanged = false;
         boolean paymentPreferForegroundChanged = false;
-        // Load current payment default from settings
-        String name =
-                Settings.Secure.getStringForUser(
-                        mContext.getContentResolver(),
-                        Settings.Secure.NFC_PAYMENT_DEFAULT_COMPONENT,
-                        userId);
 
-        if (DBG) Log.d(TAG, "loadDefaultsFromSettings() - new defaultNfcPayment name: " + name);
         if (mPaymentDefaults.currentPreferred != null) {
             if (DBG)
                 Log.d(
@@ -181,14 +177,49 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                         "loadDefaultsFromSettings() - mPaymentDefaults.currentPreferred is null");
         }
 
-        ComponentName newDefault = name != null ? ComponentName.unflattenFromString(name) : null;
+        // Load current payment default from settings
+        UserManager um =
+                mContext.createContextAsUser(
+                                UserHandle.of(ActivityManager.getCurrentUser()), /*flags=*/ 0)
+                        .getSystemService(UserManager.class);
+        List<UserHandle> userHandles = um.getEnabledProfiles();
+
+        String name = null;
+        String newDefaultName = null;
+        UserHandle newUser = null;
+        UserHandle currentUser = null;
+        // search for default payment setting within enabled profiles
+        for (UserHandle uh : userHandles) {
+            name =
+                    Settings.Secure.getStringForUser(
+                            mContext.getContentResolver(),
+                            Settings.Secure.NFC_PAYMENT_DEFAULT_COMPONENT,
+                            uh.getIdentifier());
+
+            if (DBG) Log.d(TAG, "loadDefaultsFromSettings() - new defaultNfcPayment name: " + name);
+
+            if (name != null) {
+                newUser = uh;
+                newDefaultName = name;
+            }
+            if (uh.getIdentifier() == userId) {
+                currentUser = uh;
+            }
+        }
+        // no default payment setting in all profles
+        if (newUser == null) {
+            newUser = currentUser;
+        }
+        ComponentName newDefault =
+                newDefaultName != null ? ComponentName.unflattenFromString(newDefaultName) : null;
         boolean preferForeground = false;
         try {
+            // get the setting from the main user instead of from the user profiles.
             preferForeground =
                     Settings.Secure.getIntForUser(
                                     mContext.getContentResolver(),
                                     Settings.Secure.NFC_PAYMENT_FOREGROUND,
-                                    userId)
+                                    currentUser.getIdentifier())
                             != 0;
 
             if (DBG)
@@ -206,7 +237,6 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
 
             // If pending overflow resolution due to payment default changed
             if (mIsPendingOverflowResolution == true) {
-
                 if (DBG)
                     Log.d(
                             TAG,
@@ -228,12 +258,16 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                 // mPaymentDefaults.settingsDefault = newDefault;
                 if (paymentDefaultChanged == false) {
                     if (newDefault != null
-                            && !newDefault.equals(mPaymentDefaults.currentPreferred)) {
+                            && (!newDefault.equals(mPaymentDefaults.currentPreferred)
+                                    || mPaymentDefaults.mUserHandle.getIdentifier()
+                                            != newUser.getIdentifier())) {
                         paymentDefaultChanged = true;
                         // mPaymentDefaults.currentPreferred = newDefault;
+                        // mPaymentDefaults.mUserHandle = newUser;
                     } else if (newDefault == null && mPaymentDefaults.currentPreferred != null) {
                         paymentDefaultChanged = true;
                         // mPaymentDefaults.currentPreferred = newDefault;
+                        // mPaymentDefaults.mUserHandle = newUser;
                     } else {
                         // Same default as before
                     }
@@ -241,8 +275,7 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
             }
         }
         // Notify if anything changed
-        if (paymentDefaultChanged) {
-
+        if (paymentDefaultChanged || force) {
             // Save ApduService description in case of overflow
             if (newDefault != null) {
                 StApduServiceInfo service = mServiceCache.getStService(userId, newDefault);
@@ -259,7 +292,7 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                 }
             }
 
-            mCallback.onPreferredPaymentServiceChanged(newDefault);
+            mCallback.onPreferredPaymentServiceChanged(newUser.getIdentifier(), newDefault);
 
             // Check if overflow occured due to a change of payment default
             if (NfcService.getInstance().getAidRoutingTableStatus() == true) {
@@ -327,17 +360,19 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                 }
             }
         }
-        if (paymentPreferForegroundChanged) {
+        if (paymentPreferForegroundChanged || force) {
             computePreferredForegroundService();
         }
     }
 
     void computePreferredForegroundService() {
         ComponentName preferredService = null;
+        int preferredServiceUserId;
         boolean changed = false;
         synchronized (mLock) {
             // Prio 1: next tap default
             preferredService = mNextTapDefault;
+            preferredServiceUserId = mNextTapDefaultUserId;
 
             if (preferredService != null) {
                 if (DBG)
@@ -351,6 +386,9 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
             if (preferredService == null) {
                 // Prio 2: foreground requested by app
                 preferredService = mForegroundRequested;
+                preferredServiceUserId =
+                        UserHandle.getUserHandleForUid(mForegroundUid).getIdentifier();
+
                 if (mForegroundRequested != null) {
                     if (DBG)
                         Log.d(
@@ -360,11 +398,17 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                                         + mForegroundRequested.flattenToString());
                 }
             }
-            if (preferredService != null && !preferredService.equals(mForegroundCurrent)) {
+            if (preferredService != null
+                    && (!preferredService.equals(mForegroundCurrent)
+                            || preferredServiceUserId
+                                    != UserHandle.getUserHandleForUid(mForegroundCurrentUid)
+                                            .getIdentifier())) {
                 mForegroundCurrent = preferredService;
+                mForegroundCurrentUid = mForegroundUid;
                 changed = true;
             } else if (preferredService == null && mForegroundCurrent != null) {
                 mForegroundCurrent = preferredService;
+                mForegroundCurrentUid = mForegroundUid;
                 changed = true;
             }
         }
@@ -381,7 +425,7 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
 
         // Notify if anything changed
         if (changed) {
-            mCallback.onPreferredForegroundServiceChanged(preferredService);
+            mCallback.onPreferredForegroundServiceChanged(preferredServiceUserId, preferredService);
         }
     }
 
@@ -405,20 +449,16 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
             // User closed the notification, so we rollback the pending change
             mIsPendingOverflowResolution = false;
             mPaymentDefaults.currentPreferred = mPaymentDefaults.settingsDefault;
-
             // clear overflow
-            mCallback.onPreferredPaymentServiceChanged(mPaymentDefaults.currentPreferred);
-
-            //
-            //            int currentUser = ActivityManager.getCurrentUser();
-            //            loadDefaultsFromSettings(currentUser);
-            //
+            mCallback.onPreferredPaymentServiceChanged(
+                    mPaymentDefaults.mUserHandle.getIdentifier(),
+                    mPaymentDefaults.currentPreferred);
             refreshTapAndPayDisplay();
         }
     }
 
-    public boolean setDefaultForNextTap(ComponentName service) {
-
+    /** Set default service for next tap */
+    public boolean setDefaultForNextTap(int userId, ComponentName service) {
         if (service != null) {
             if (DBG) Log.d(TAG, "setDefaultForNextTap() - service: " + service.flattenToString());
         } else {
@@ -428,13 +468,13 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
         // This is a trusted API, so update without checking
         synchronized (mLock) {
             mNextTapDefault = service;
+            mNextTapDefaultUserId = userId;
         }
         computePreferredForegroundService();
         return true;
     }
 
     public void onServicesUpdated() {
-
         // Check if pending overflow resolution
         if (mIsPendingOverflowResolution == true) {
 
@@ -469,21 +509,20 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
             // it could have registered new AIDs that make it conflict with user
             // preferences.
             if (mForegroundCurrent != null) {
-
                 if (DBG)
                     Log.d(
                             TAG,
                             "onServicesUpdated() - mForegroundCurrent : "
                                     + mForegroundCurrent.flattenToString());
 
-                if (!isForegroundAllowedLocked(mForegroundCurrent)) {
+                if (!isForegroundAllowedLocked(mForegroundCurrent, mForegroundCurrentUid)) {
                     Log.d(TAG, "Removing foreground preferred service.");
                     mForegroundRequested = null;
                     mForegroundUid = -1;
+                    mForegroundCurrentUid = -1;
                     changed = true;
                 }
             } else {
-
                 if (DBG) Log.d(TAG, "onServicesUpdated() - mForegroundCurrent : null");
 
                 // Don't care about this service
@@ -495,8 +534,7 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
     }
 
     // Verifies whether a service is allowed to register as preferred
-    boolean isForegroundAllowedLocked(ComponentName service) {
-
+    boolean isForegroundAllowedLocked(ComponentName service, int callingUid) {
         if (service != null) {
             if (DBG)
                 Log.d(TAG, "isForegroundAllowedLocked() - service: " + service.flattenToString());
@@ -511,7 +549,8 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
         }
 
         StApduServiceInfo serviceInfo =
-                mServiceCache.getStService(ActivityManager.getCurrentUser(), service);
+                mServiceCache.getStService(
+                        UserHandle.getUserHandleForUid(callingUid).getIdentifier(), service);
         if (serviceInfo == null) {
             Log.d(
                     TAG,
@@ -519,7 +558,7 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                             + "removed");
             return false;
         }
-        // Do some sanity checking
+        // Do some quick checking
         if (!mPaymentDefaults.preferForeground) {
             // Foreground apps are not allowed to override payment default
             // Check if this app registers payment AIDs, in which case we'll fail anyway
@@ -536,13 +575,14 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
             final List<String> otherAids = serviceInfo.getAids();
             StApduServiceInfo paymentServiceInfo =
                     mServiceCache.getStService(
-                            ActivityManager.getCurrentUser(), mPaymentDefaults.currentPreferred);
+                            mPaymentDefaults.mUserHandle.getIdentifier(),
+                            mPaymentDefaults.currentPreferred);
             if (paymentServiceInfo != null && otherAids != null && otherAids.size() > 0) {
                 for (String aid : otherAids) {
                     RegisteredAidCache.AidResolveInfo resolveInfo = mAidCache.resolveAid(aid);
                     if (CardEmulation.CATEGORY_PAYMENT.equals(resolveInfo.category)
                             && paymentServiceInfo.equals(resolveInfo.defaultService)) {
-                        if (DBG2)
+                        if (DBG)
                             Log.d(
                                     TAG,
                                     "AID "
@@ -565,7 +605,6 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
     }
 
     public boolean registerPreferredForegroundService(ComponentName service, int callingUid) {
-
         if (service != null) {
             if (DBG)
                 Log.d(
@@ -578,7 +617,7 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
 
         boolean success = false;
         synchronized (mLock) {
-            if (isForegroundAllowedLocked(service)) {
+            if (isForegroundAllowedLocked(service, callingUid)) {
                 if (mForegroundUtils.registerUidToBackgroundCallback(this, callingUid)) {
                     mForegroundRequested = service;
                     mForegroundUid = callingUid;
@@ -614,7 +653,6 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
     }
 
     boolean unregisterForegroundService(int uid) {
-
         if (DBG) Log.d(TAG, "unregisterForegroundService()");
 
         boolean success = false;
@@ -632,7 +670,6 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
     }
 
     public boolean unregisteredPreferredForegroundService(int callingUid) {
-
         if (DBG) Log.d(TAG, "unregisteredPreferredForegroundService()");
 
         // Verify the calling UID is in the foreground
@@ -646,7 +683,6 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
 
     @Override
     public void onUidToBackground(int uid) {
-
         if (DBG) Log.d(TAG, "onUidToBackground()");
         // reset flags for foreground
         NfcService.getInstance().setForegroundAllowed(false, "SIM");
@@ -655,7 +691,6 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
     }
 
     public void onHostEmulationActivated() {
-
         if (DBG) Log.d(TAG, "onHostEmulationActivated()");
 
         synchronized (mLock) {
@@ -664,7 +699,6 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
     }
 
     public void onHostEmulationDeactivated() {
-
         if (DBG) Log.d(TAG, "onHostEmulationDeactivated()");
 
         // If we had any next tap defaults set, clear them out
@@ -692,14 +726,12 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
     }
 
     public void onUserSwitched(int userId) {
-
         if (DBG) Log.d(TAG, "onUserSwitched()");
 
-        loadDefaultsFromSettings(userId);
+        loadDefaultsFromSettings(userId, true);
     }
 
     public boolean packageHasPreferredService(String packageName) {
-
         if (DBG) Log.d(TAG, "packageHasPreferredService() - packageName: " + packageName);
 
         if (packageName == null) return false;
@@ -719,11 +751,22 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
         pw.println("HCENfc_PreferredServices - Preferred services (in order of importance): ");
         pw.println(
                 "HCENfc_PreferredServices -     *** Current preferred foreground service: "
-                        + mForegroundCurrent);
+                        + mForegroundCurrent
+                        + " (UID:"
+                        + mForegroundCurrentUid
+                        + ")");
         pw.println(
                 "HCENfc_PreferredServices -     *** Current preferred payment service: "
-                        + mPaymentDefaults.currentPreferred);
-        pw.println("HCENfc_PreferredServices -         Next tap default: " + mNextTapDefault);
+                        + mPaymentDefaults.currentPreferred
+                        + "("
+                        + getUserName(mPaymentDefaults.mUserHandle)
+                        + ")");
+        pw.println(
+                "HCENfc_PreferredServices -         Next tap default: "
+                        + mNextTapDefault
+                        + " ("
+                        + getUserName(UserHandle.of(mNextTapDefaultUserId))
+                        + ")");
         pw.println(
                 "HCENfc_PreferredServices -         Default for foreground app (UID: "
                         + mForegroundUid
@@ -731,11 +774,26 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                         + mForegroundRequested);
         pw.println(
                 "HCENfc_PreferredServices -         Default in payment settings: "
-                        + mPaymentDefaults.settingsDefault);
+                        + mPaymentDefaults.settingsDefault
+                        + "("
+                        + getUserName(mPaymentDefaults.mUserHandle)
+                        + ")");
         pw.println(
                 "HCENfc_PreferredServices -         Payment settings allows override: "
                         + mPaymentDefaults.preferForeground);
         pw.println("");
+    }
+
+    private String getUserName(UserHandle uh) {
+        if (uh == null) {
+            return null;
+        }
+        UserManager um =
+                mContext.createContextAsUser(uh, /*flags=*/ 0).getSystemService(UserManager.class);
+        if (um == null) {
+            return null;
+        }
+        return um.getUserName();
     }
 
     /**

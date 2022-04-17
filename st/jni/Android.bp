@@ -21,7 +21,6 @@ cc_library_shared {
         "libchrome",
         "libbase",
         "libdl",
-        "libnfc_st_dta_jni",
     ],
 
     static_libs: [	"libxml2",

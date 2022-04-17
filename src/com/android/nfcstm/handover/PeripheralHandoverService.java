@@ -122,14 +122,17 @@ public class PeripheralHandoverService extends Service
 
         if (intent == null) {
             if (DBG) Log.e(TAG, "Intent is null, can't do peripheral handover.");
-            stopSelf(startId);
+            synchronized (sLock) {
+                stopSelf(startId);
+                mStartId = 0;
+            }
             return START_NOT_STICKY;
         }
 
         if (doPeripheralHandover(intent.getExtras())) {
             return START_STICKY;
         } else {
-            stopSelf(startId);
+            onBluetoothPeripheralHandoverComplete(false);
             return START_NOT_STICKY;
         }
     }
@@ -187,14 +190,12 @@ public class PeripheralHandoverService extends Service
         }
         if (mBluetoothAdapter.isEnabled()) {
             if (!mBluetoothPeripheralHandover.start()) {
-                mHandler.removeMessages(MSG_PAUSE_POLLING);
-                mNfcAdapter.resumePolling();
+                return false;
             }
         } else {
             // Once BT is enabled, the headset pairing will be started
             if (!enableBluetooth()) {
                 Log.e(TAG, "Error enabling Bluetooth.");
-                mBluetoothPeripheralHandover = null;
                 return false;
             }
         }
@@ -209,7 +210,7 @@ public class PeripheralHandoverService extends Service
             if (mBluetoothPeripheralHandover != null
                     && !mBluetoothPeripheralHandover.hasStarted()) {
                 if (!mBluetoothPeripheralHandover.start()) {
-                    mNfcAdapter.resumePolling();
+                    onBluetoothPeripheralHandoverComplete(false);
                 }
             }
         }

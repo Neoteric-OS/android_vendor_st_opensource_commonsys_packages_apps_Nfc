@@ -16,11 +16,13 @@
 #include "StHciEventManager.h"
 #include <android-base/stringprintf.h>
 #include <base/logging.h>
+#include <log/log.h>
 #include <nativehelper/ScopedLocalRef.h>
 #include "JavaClassConstants.h"
 #include "NfcJniUtil.h"
 #include "nfc_config.h"
 #include "StSecureElement.h"
+#include "NfcStExtensions.h"
 
 using android::base::StringPrintf;
 
@@ -149,7 +151,6 @@ std::vector<uint8_t> StHciEventManager::getDataFromBerTlv(
     return std::vector<uint8_t>();
   }
   size_t lengthTag = berTlv[0];
-  DLOG_IF(INFO, nfc_debug_enabled) << "decodeBerTlv: berTlv[0]=" << berTlv[0];
 
   /* As per ISO/IEC 7816, read the first byte to determine the length and
    * the start index accordingly
@@ -200,11 +201,6 @@ void StHciEventManager::nfaHciCallback(tNFA_HCI_EVT event,
     return;
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s - event=%d code=%d pipe=%d len=%d", fn, event,
-                      eventData->rcvd_evt.evt_code, eventData->rcvd_evt.pipe,
-                      eventData->rcvd_evt.evt_len);
-
   if (eventData->rcvd_evt.evt_code != 0x12) {
     return;
   }
@@ -212,31 +208,38 @@ void StHciEventManager::nfaHciCallback(tNFA_HCI_EVT event,
   std::string evtSrc;
   uint8_t nfceeId = 0x00;
 
-  if (eventData->rcvd_evt.pipe == sEsePipe) {
-    nfceeId = StSecureElement::getInstance().getConnectedNfceeId(0x82);
+  // Get Host Id (HCI)
+  nfceeId =
+      NfcStExtensions::getInstance().getHostIdForPipe(eventData->rcvd_evt.pipe);
+  // Get NFCEE Id
+  nfceeId = StSecureElement::getInstance().getSENfceeId(nfceeId);
+  // Check which NFCEE is connected
+  nfceeId = StSecureElement::getInstance().getConnectedNfceeId(nfceeId);
 
-    if (nfceeId == 0x84) {
-      evtSrc = "DHSE1";
-    } else {
-      evtSrc = "eSE1";
-    }
-  } else if ((eventData->rcvd_evt.pipe == sSimPipe) ||
-             (eventData->rcvd_evt.pipe == UICC2_PIPE_ID)) {
-    nfceeId = StSecureElement::getInstance().getConnectedNfceeId(0x81);
-
-    if (nfceeId == 0x81) {
+  switch (nfceeId) {
+    case 0x81:
       evtSrc = "SIM1";
-    } else {
+      break;
+    case 0x82:
+    case 0x86:
+      evtSrc = "eSE1";
+      break;
+    case 0x83:
+    case 0x85:
       evtSrc = "SIM2";
-    }
-  } else {
-    LOG(WARNING) << "Incorrect Pipe Id";
-    return;
+      break;
+    case 0x84:
+      evtSrc = "DHSE1";
+      break;
+    default:
+      LOG(WARNING) << fn << "; Incorrect Pipe Id";
+      return;
   }
 
-  //  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-  //          "%s: EVT_TRANSACTION rx; pipe = 0x%02X, Host HCI ID = 0x%02X, Host
-  //          NFCEE ID = 0x%02X", fn, pipeId, hostId, nfceeId);
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+      "%s; event=0x%x code=0x%x pipe=0x%x len=%d host=%s", fn, event,
+      eventData->rcvd_evt.evt_code, eventData->rcvd_evt.pipe,
+      eventData->rcvd_evt.evt_len, evtSrc.c_str());
 
   uint8_t* buff = eventData->rcvd_evt.p_evt_buf;
   uint32_t buffLength = eventData->rcvd_evt.evt_len;
@@ -245,20 +248,25 @@ void StHciEventManager::nfaHciCallback(tNFA_HCI_EVT event,
   if (event == NFA_HCI_EVENT_RCVD_EVT &&
       eventData->rcvd_evt.evt_code == NFA_HCI_EVT_TRANSACTION &&
       buffLength > 3 && event_buff[0] == 0x81) {
-    int aidlen = event_buff[1];
-    std::vector<uint8_t> aid(event_buff.begin() + 2,
-                             event_buff.begin() + aidlen + 2);
+    uint32_t aidlen = event_buff[1];
+    if (aidlen < (buffLength - 1)) {
+      std::vector<uint8_t> aid(event_buff.begin() + 2,
+                               event_buff.begin() + aidlen + 2);
 
-    int32_t berTlvStart = aidlen + 2 + 1;
-    int32_t berTlvLen = buffLength - berTlvStart;
-    std::vector<uint8_t> data;
-    if (berTlvLen > 0 && event_buff[2 + aidlen] == 0x82) {
-      std::vector<uint8_t> berTlv(event_buff.begin() + berTlvStart,
-                                  event_buff.end());
-      // BERTLV decoding here, to support extended data length for params.
-      data = getInstance().getDataFromBerTlv(berTlv);
+      int32_t berTlvStart = aidlen + 2 + 1;
+      int32_t berTlvLen = buffLength - berTlvStart;
+      std::vector<uint8_t> data;
+      if (berTlvLen > 0 && event_buff[2 + aidlen] == 0x82) {
+        std::vector<uint8_t> berTlv(event_buff.begin() + berTlvStart,
+                                    event_buff.end());
+        // BERTLV decoding here, to support extended data length for params.
+        data = getInstance().getDataFromBerTlv(berTlv);
+      }
+      getInstance().notifyTransactionListenersOfAid(aid, data, evtSrc);
+    } else {
+      android_errorWriteLog(0x534e4554, "181346545");
+      LOG(ERROR) << StringPrintf("error: aidlen(%d) is too big", aidlen);
     }
-    getInstance().notifyTransactionListenersOfAid(aid, data, evtSrc);
   }
 }
 

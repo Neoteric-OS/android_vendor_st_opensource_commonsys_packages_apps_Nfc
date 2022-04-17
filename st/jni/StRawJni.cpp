@@ -40,9 +40,6 @@ int was_activated = 0;
 static int sExtRawEnabledMode;
 static tNFA_INTF_TYPE sCurrentRfInterface;
 
-int (*pRawJniSeqSplit)(int, uint8_t *, size_t, uint8_t *, size_t,
-                       size_t *) = NULL;
-
 uint8_t last_atqa[2];
 uint8_t last_uid[10];
 size_t last_uidlen;
@@ -57,8 +54,20 @@ extern void startRfDiscovery(bool isStart);
 extern bool isDiscoveryStarted();
 extern bool nfcManager_isNfcActive();
 extern int reSelect(tNFA_INTF_TYPE rfInterface, bool fSwitchIfNeeded);
+
+extern void (*g_pRawJniUnload)();
 }  // namespace android
 
+/*******************************************************************************
+**
+** Function:        nativeNfcTag_registerNdefTypeHandler
+**
+** Description:     Register a callback to receive NDEF message from the tag
+**                  from the NFA_NDEF_DATA_EVT.
+**
+** Returns:         None
+**
+*******************************************************************************/
 static void rawNfaConnectionCallback(uint8_t connEvent,
                                      tNFA_CONN_EVT_DATA *eventData) {
   sExtRawEvent.start();
@@ -72,12 +81,54 @@ static void rawNfaConnectionCallback(uint8_t connEvent,
   sExtRawEvent.end();
 }
 
+static void *mRawHandle = NULL;
+static int (*mRawJniSeqSplit)(int, uint8_t *, size_t, uint8_t *, size_t,
+                              size_t *) = NULL;
+
+static void rawJniUnload() {
+  mRawJniSeqSplit = NULL;
+  if (mRawHandle) {
+    dlclose(mRawHandle);
+    mRawHandle = NULL;
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; Unloaded library", __func__);
+  }
+}
+
+static int (*rawJniLoad())(int, uint8_t *, size_t, uint8_t *, size_t,
+                           size_t *) {
+  if (!mRawJniSeqSplit) {
+    mRawHandle = dlopen("libstnfc_raw.so", RTLD_NOW);
+    if (mRawHandle) {
+      DLOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s; Loaded library", __func__);
+      mRawJniSeqSplit = (int (*)(int, uint8_t *, size_t, uint8_t *, size_t,
+                                 size_t *))dlsym(mRawHandle, "rawJniSeqSplit");
+      if (mRawJniSeqSplit) {
+        DLOG_IF(INFO, nfc_debug_enabled)
+            << StringPrintf("%s; External module found for RAW mode", __func__);
+        // Make sure it will be unloaded at the next card deactivation
+        android::g_pRawJniUnload = rawJniUnload;
+      } else {
+        LOG(ERROR) << StringPrintf("%s; Invalid RAW mode library found",
+                                   __func__);
+        dlclose(mRawHandle);
+        mRawHandle = NULL;
+      }
+    }
+  }
+  return mRawJniSeqSplit;
+}
+
 int rawJniSeq(int i, uint8_t *inba, size_t inbasz, uint8_t *outba,
               size_t outbaszmax, size_t *outbasz) {
   int ret = -1;
+  int (*pRawJniSeqSplit)(int, uint8_t *, size_t, uint8_t *, size_t, size_t *) =
+      NULL;
+
   *outbasz = 0;
   DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s - enter, %d", __func__, i);
+      << StringPrintf("%s; enter, %d", __func__, i);
 
   NfcStExtensions::getInstance().getFirmwareVersion(sFwVersion);
 
@@ -86,21 +137,7 @@ int rawJniSeq(int i, uint8_t *inba, size_t inbasz, uint8_t *outba,
 
   // start sequence
   // Is there an external module ?
-  if (!pRawJniSeqSplit) {
-    void *handle = NULL;
-    handle = dlopen("libstnfc_raw.so", RTLD_NOW);
-    if (handle) {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: Loaded library", __func__);
-      pRawJniSeqSplit = (int (*)(int, uint8_t *, size_t, uint8_t *, size_t,
-                                 size_t *))dlsym(handle, "rawJniSeqSplit");
-      if (pRawJniSeqSplit) {
-        LOG(INFO) << StringPrintf("%s: External module found for RAW mode",
-                                  __func__);
-      }
-    }
-  }
-
+  pRawJniSeqSplit = rawJniLoad();
   if (pRawJniSeqSplit) {
     ret = (*pRawJniSeqSplit)(i, inba, inbasz, outba, outbaszmax, outbasz);
     goto end;
@@ -113,12 +150,13 @@ int rawJniSeq(int i, uint8_t *inba, size_t inbasz, uint8_t *outba,
     size_t uidlen;
     uint8_t sak;
 
-    PRINTF("Extended raw mode specific API test...\n");
+    PRINTF("%s; Extended raw mode specific API test...\n", __func__);
     if (!nfc_mode_configure(1)) {
       break;
     }
     nfc_get_card_info(atqa, uid, &uidlen, &sak);
-    PRINTF("ATQA: %02hhx%02hhx  SAK:%02hhx\n", atqa[0], atqa[1], sak);
+    PRINTF("%s; ATQA: %02hhx%02hhx  SAK:%02hhx\n", __func__, atqa[0], atqa[1],
+           sak);
 
     {
       uint8_t tx[] = {0x60, 0x0b, 0x26, 0xc5};
@@ -135,7 +173,7 @@ int rawJniSeq(int i, uint8_t *inba, size_t inbasz, uint8_t *outba,
       int ret = nfc_initiator_transceive_bits(NULL, tx, sizeof(tx) * 8, txpar,
                                               rx, sizeof(rx), rxpar);
       if (ret < 0) {
-        PRINTF("nfc_initiator_transceive_bits returned an error");
+        PRINTF("%s; nfc_initiator_transceive_bits returned an error", __func__);
         break;  // ignore if there is no response
       }
     }
@@ -167,13 +205,21 @@ end:
   // unregister callbacks
   android::unRegisterRawRfCallback();
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("return %d", ret);
+  DLOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; return %d", __func__, ret);
   return ret;
 }
 
-/* ********************************************** */
-/* ********************************************** */
-
+/*******************************************************************************
+**
+** Function:        nativeNfcTag_registerNdefTypeHandler
+**
+** Description:     Register a callback to receive NDEF message from the tag
+**                  from the NFA_NDEF_DATA_EVT.
+**
+** Returns:         None
+**
+*******************************************************************************/
 extern "C" void nfc_get_card_info(uint8_t atqa[2], uint8_t uid[10],
                                   size_t *uidlen, uint8_t *sak) {
   memcpy(atqa, last_atqa, sizeof(last_atqa));
@@ -182,6 +228,16 @@ extern "C" void nfc_get_card_info(uint8_t atqa[2], uint8_t uid[10],
   *sak = last_sak;
 }
 
+/*******************************************************************************
+**
+** Function:        nativeNfcTag_registerNdefTypeHandler
+**
+** Description:     Register a callback to receive NDEF message from the tag
+**                  from the NFA_NDEF_DATA_EVT.
+**
+** Returns:         None
+**
+*******************************************************************************/
 static void printf_buffer(const char *header, const uint8_t *buf,
                           size_t buflen) {
   char value[buflen * 3 + 1];
@@ -190,18 +246,29 @@ static void printf_buffer(const char *header, const uint8_t *buf,
   for (i = 0; i < (int)buflen; i++) {
     snprintf(value + 2 * i, sizeof(value) - (2 * i), "%02hhX ", buf[i]);
   }
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s%s", header, value);
+  DLOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; %s %s", __func__, header, value);
 }
 
+/*******************************************************************************
+**
+** Function:        nativeNfcTag_registerNdefTypeHandler
+**
+** Description:     Register a callback to receive NDEF message from the tag
+**                  from the NFA_NDEF_DATA_EVT.
+**
+** Returns:         None
+**
+*******************************************************************************/
 extern "C" bool nfc_mode_configure(int bRawMode) {
   bool was_started = false;
   if (!android::nfcManager_isNfcActive()) {
     DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: NFC disabled", __FUNCTION__);
+        << StringPrintf("%s; NFC disabled", __FUNCTION__);
     return false;
   }
 
-  PRINTF("nfc_mode_configure(%s)", bRawMode ? "true" : "false");
+  PRINTF("%s; %s", __func__, bRawMode ? "true" : "false");
 
   was_started = android::isDiscoveryStarted();
   if (was_started && was_activated) {
@@ -231,7 +298,7 @@ extern "C" bool nfc_mode_configure(int bRawMode) {
       !NfcStExtensions::getInstance().sendRawRfCmd(PROP_CTRL_RF_RAW_MODE_CMD,
                                                    bRawMode ? true : false)) {
     DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s: Failed to configure the EXT RAW mode", __func__);
+        << StringPrintf("%s; Failed to configure the EXT RAW mode", __func__);
     if (was_started) {
       android::startRfDiscovery(true);
     }
@@ -284,17 +351,18 @@ extern "C" bool nfc_mode_configure(int bRawMode) {
                      bRawMode ? NFC_INTERFACE_FRAME : NFC_INTERFACE_MIFARE);
         } break;
         case 255: {
-          DLOG_IF(INFO, nfc_debug_enabled)
-              << "sExtRawEvent signaled but no event ?";
+          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+              "%s; sExtRawEvent signaled but no event ?", __func__);
         } break;
         default: {
-          DLOG_IF(INFO, nfc_debug_enabled)
-              << "sExtRawEvent signaled but event unsupported";
+          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+              "%s; sExtRawEvent signaled but event unsupported", __func__);
         } break;
       }
     } else {
       // no event in 500ms, timeout
-      DLOG_IF(INFO, nfc_debug_enabled) << "no event in 500ms, timeout";
+      DLOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s; no event in 500ms, timeout", __func__);
       sExtRawEvent.end();
       return false;
     }
@@ -303,6 +371,16 @@ extern "C" bool nfc_mode_configure(int bRawMode) {
   return true;
 }
 
+/*******************************************************************************
+**
+** Function:        nativeNfcTag_registerNdefTypeHandler
+**
+** Description:     Register a callback to receive NDEF message from the tag
+**                  from the NFA_NDEF_DATA_EVT.
+**
+** Returns:         None
+**
+*******************************************************************************/
 extern "C" int nfc_initiator_transceive_bytes(void *pnd, const uint8_t *pbtTx,
                                               const size_t szTx, uint8_t *pbtRx,
                                               const size_t szRx, int timeout) {
@@ -314,7 +392,7 @@ extern "C" int nfc_initiator_transceive_bytes(void *pnd, const uint8_t *pbtTx,
   // check started and card present
   if (!was_activated) {
     DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: no activated card", __FUNCTION__);
+        << StringPrintf("%s; no activated card", __FUNCTION__);
     return NFC_EINVARG;
   }
   printf_buffer("TRANSCEIVE BYTES: ", pbtTx, szTx);
@@ -345,12 +423,12 @@ extern "C" int nfc_initiator_transceive_bytes(void *pnd, const uint8_t *pbtTx,
     if (timeout < 0) timeout = 500;
     if (timeout) {
       if (!sExtRawEvent.wait(timeout)) {
-        PRINTF("TIMEOUT");
+        PRINTF("%s; TIMEOUT", __func__);
         sExtRawEvent.end();
         return NFC_ETIMEOUT;
       }
     } else {
-      PRINTF("WAIT FOR DATA");
+      PRINTF("%s; WAIT FOR DATA", __func__);
       sExtRawEvent.wait();
     }
 
@@ -375,7 +453,7 @@ extern "C" int nfc_initiator_transceive_bytes(void *pnd, const uint8_t *pbtTx,
               ret = 1;
               is4bits = 1;
             } else {
-              PRINTF("Unexpected status: %02hhxx",
+              PRINTF("%s; Unexpected status: %02hhxx", __func__,
                      eventData->data.p_data[eventData->data.len - 1]);
               ret = NFC_EOTHER;
             }
@@ -413,19 +491,19 @@ extern "C" int nfc_initiator_transceive_bytes(void *pnd, const uint8_t *pbtTx,
           if (ret > 0) {
             printf_buffer("RECV BYTES: ", pbtRx, ret < (int)szRx ? ret : szRx);
           } else if (ret == 0) {
-            PRINTF("RECV: OK");
+            PRINTF("%s; RECV: OK", __func__);
           } else {
-            PRINTF("RECV: error");
+            PRINTF("%s; RECV: error", __func__);
           }
 
         } break;
         case 255: {
-          DLOG_IF(INFO, nfc_debug_enabled)
-              << "sExtRawEvent signaled but no event ?";
+          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+              "%s; sExtRawEvent signaled but no event ?", __func__);
         } break;
         default: {
-          DLOG_IF(INFO, nfc_debug_enabled)
-              << "sExtRawEvent signaled but event unsupported";
+          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+              "%s; sExtRawEvent signaled but event unsupported", __func__);
         } break;
       }
     }
@@ -434,6 +512,16 @@ extern "C" int nfc_initiator_transceive_bytes(void *pnd, const uint8_t *pbtTx,
   return ret;
 }
 
+/*******************************************************************************
+**
+** Function:        nativeNfcTag_registerNdefTypeHandler
+**
+** Description:     Register a callback to receive NDEF message from the tag
+**                  from the NFA_NDEF_DATA_EVT.
+**
+** Returns:         None
+**
+*******************************************************************************/
 extern "C" int nfc_initiator_transceive_bits(void *pnd, const uint8_t *pbtTx,
                                              const size_t szTxBits,
                                              const uint8_t *pbtTxPar,
@@ -447,17 +535,17 @@ extern "C" int nfc_initiator_transceive_bits(void *pnd, const uint8_t *pbtTx,
   // check started and card present
   if (!was_activated) {
     DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: no activated card", __FUNCTION__);
+        << StringPrintf("%s; no activated card", __FUNCTION__);
     return NFC_EINVARG;
   }
   if (!sExtRawEnabledMode) {
     DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: not in raw mode", __FUNCTION__);
+        << StringPrintf("%s; not in raw mode", __FUNCTION__);
     return NFC_EINVARG;
   }
   if (szTxBits % 8) {
     DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: partial bytes not supported yet", __FUNCTION__);
+        << StringPrintf("%s; partial bytes not supported yet", __FUNCTION__);
     return NFC_EINVARG;
   }
   printf_buffer("TRANSCEIVE BITS: ", pbtTx, szTxBits / 8);
@@ -477,7 +565,7 @@ extern "C" int nfc_initiator_transceive_bits(void *pnd, const uint8_t *pbtTx,
   {
     CONN_event_code = 255;
     if (!sExtRawEvent.wait(1000)) {
-      PRINTF("TIMEOUT");
+      PRINTF("%s; TIMEOUT", __func__);
       sExtRawEvent.end();
       return NFC_ETIMEOUT;
     }
@@ -502,7 +590,7 @@ extern "C" int nfc_initiator_transceive_bits(void *pnd, const uint8_t *pbtTx,
             ret = 1;
             is4bits = 1;
           } else {
-            PRINTF("Unexpected status: %02hhxx",
+            PRINTF("%s; Unexpected status: %02hhxx", __func__,
                    eventData->data.p_data[eventData->data.len - 1]);
             ret = NFC_EOTHER;
           }
@@ -510,17 +598,17 @@ extern "C" int nfc_initiator_transceive_bits(void *pnd, const uint8_t *pbtTx,
           if (ret >= 0) {
             printf_buffer("RECV BITS: ", pbtRx, ret < (int)szRx ? ret : szRx);
           } else {
-            PRINTF("RECV: error");
+            PRINTF("%s; RECV: error", __func__);
           }
 
         } break;
         case 255: {
-          DLOG_IF(INFO, nfc_debug_enabled)
-              << "sExtRawEvent signaled but no event ?";
+          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+              "%s; sExtRawEvent signaled but no event ?", __func__);
         } break;
         default: {
-          DLOG_IF(INFO, nfc_debug_enabled)
-              << "sExtRawEvent signaled but event unsupported";
+          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+              "%s; sExtRawEvent signaled but event unsupported", __func__);
         } break;
       }
     }

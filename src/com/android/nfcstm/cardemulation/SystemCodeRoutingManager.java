@@ -16,6 +16,7 @@
 
 package com.android.nfcstm.cardemulation;
 
+import android.os.SystemProperties;
 import android.util.Log;
 import android.util.proto.ProtoOutputStream;
 import com.android.nfcstm.NfcService;
@@ -28,7 +29,7 @@ import java.util.List;
 public class SystemCodeRoutingManager {
     static final String TAG = "SystemCodeRoutingManager";
 
-    static final boolean DBG = true;
+    static final boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
 
     final Object mLock = new Object();
 

@@ -34,6 +34,7 @@ import android.nfc.NdefRecord;
 import android.nfc.NfcAdapter;
 import android.os.Bundle;
 import android.os.RemoteException;
+import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.util.EventLog;
 import android.util.Log;
@@ -50,7 +51,7 @@ import java.util.ArrayList;
  */
 public class BeamShareActivity extends Activity {
     static final String TAG = "BeamShareActivity";
-    static final boolean DBG = false;
+    static final boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
 
     ArrayList<Uri> mUris;
     NdefMessage mNdefMessage;

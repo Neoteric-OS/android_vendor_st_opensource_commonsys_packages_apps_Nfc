@@ -52,7 +52,7 @@ class StRoutingManager {
   void eeSetPwrAndLinkCtrl(uint8_t config);
   void forceRouting(uint8_t nfceeid);
   void stopforceRouting();
-  void NfceeDiscover();
+  void nfceeDiscover();
 
   bool clearAidTable();
 
@@ -67,6 +67,10 @@ class StRoutingManager {
   bool setSEFelicaCardEnable(bool status);
 
   void setMuteTech(uint8_t bitmap);
+  uint8_t getMuteTech();
+
+  int getRemainingLmrtSize();
+  void notifyAidAdded();
 
  private:
   StRoutingManager();
@@ -74,11 +78,12 @@ class StRoutingManager {
   StRoutingManager(const StRoutingManager&);
   StRoutingManager& operator=(const StRoutingManager&);
 
+  void notifyEeUpdated();
+
   void handleData(uint8_t technology, const uint8_t* data, uint32_t dataLen,
                   tNFA_STATUS status);
   void notifyActivated(uint8_t technology);
   void notifyDeactivated(uint8_t technology);
-  void notifyEeUpdated();
   tNFA_TECHNOLOGY_MASK updateEeTechRouteSetting();
   void updateDefaultProtocolRoute();
   void updateDefaultRoute();
@@ -90,6 +95,8 @@ class StRoutingManager {
                              int felicaRoute, int abTechRoute, int scRoute);
 
   int getScTypeFRouting(eJNI_ROUTING_TYPE type);
+
+  int checkIsoDepSupport(int route);
 
   // Every routing table entry is matched exact (BCM20793)
   static const int AID_MATCHING_EXACT_ONLY = 0x00;
@@ -165,6 +172,8 @@ class StRoutingManager {
 
   uint8_t mMuteTechBitmap;
 
+  uint16_t mRemainingLmrtSize;
+
   tNFA_EE_CBACK_DATA mCbEventData;
   tNFA_EE_DISCOVER_REQ mEeInfo;
   tNFA_TECHNOLOGY_MASK mSeTechMask;
@@ -177,4 +186,5 @@ class StRoutingManager {
   SyncEvent mEePwrAndLinkCtrlEvent;
   SyncEvent mEeForceRoutingEvent;
   SyncEvent mEeDiscoverEvent;
+  SyncEvent mEeRemaingLmrtSizeEvent;
 };

@@ -204,7 +204,7 @@ public class NfcCharging extends Activity {
     }
 
     public boolean startNfcCharging(boolean switchon) {
-        Log.d(TAG, "StartNfcCharging Enter 1.3.07");
+        Log.d(TAG, "StartNfcCharging Enter 1.3.08");
 
         byte ByteToSet = 0x00;
         byte[] NciParamValueEn = {0x1};
@@ -471,7 +471,7 @@ public class NfcCharging extends Activity {
     }
 
     public void configureNfcCharging(TagEndpoint t) {
-        Log.d(TAG, "configureNfcCharging 1.3.07");
+        Log.d(TAG, "configureNfcCharging 1.3.08");
 
         TagHandler = t;
         WLCL_Presence = true;
@@ -612,7 +612,7 @@ public class NfcCharging extends Activity {
             } else {
                 WlcCtl_HoldOffWt = mNdefPayload[5];
             }
-            THoldOffWt = (int) Math.pow(2, (WlcCtl_HoldOffWt + 3));
+            THoldOffWt = (int) WlcCtl_HoldOffWt * 2;
 
         } else {
             status = false;
@@ -1191,6 +1191,15 @@ public class NfcCharging extends Activity {
             case STATE_21:
                 { // SM21
                     Log.d(TAG, "HandleWLCState STATE_21");
+                    if (THoldOffWt > 0) {
+                        try {
+                            this.wait(THoldOffWt);
+
+                        } catch (InterruptedException e) {
+                            // Activity detected, loop
+                            Log.d(TAG, "Interrupted thread");
+                        }
+                    }
                     if (WlcCtl_PowerAdjReq != 0 || !((WlcCtl_PowerAdjReq > 0) && Ptx == 0x64)) {
                         // AdjustPower
                         adjustPower();

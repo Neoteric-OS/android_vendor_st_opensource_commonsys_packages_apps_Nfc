@@ -27,6 +27,7 @@
 #include "nfa_hci_api.h"
 #include "nfa_hci_defs.h"
 #include "nfa_ce_api.h"
+#include "nfa_rw_api.h"
 
 typedef struct {
   bool added;
@@ -54,22 +55,17 @@ typedef struct {
 typedef struct {
   uint8_t nb_pipes;
   uint8_t nb_info_rx;
-  /* NCI 2.0 - Begin */
   t_JNI_PIPE_DATA data[15];
-  /* NCI 2.0 - End */
 } tJNI_PIPES_INFO;
 
 typedef struct {
   uint8_t config[7];
   bool sendcmd_status;
 } tJNI_NFCC_CONFIG;
-
-/* NCI 2.0 - Begin */
 typedef struct {
   uint8_t config[250];
   bool sendcmd_status;
 } tJNI_PROP_CONFIG;
-/* NCI 2.0 - End */
 
 typedef struct {
   uint8_t measValue;
@@ -99,21 +95,17 @@ class NfcStExtensions {
   static const uint16_t DUMMY_SYTEM_PROP_VALUE = 0xFFFF;
 
   static const uint8_t CRC_CONFIG_SIZE = 4;
-  /* NCI 2.0 - Begin */
   static const uint8_t FW_VERSION_SIZE = 4;
   static const uint8_t HW_VERSION_SIZE = 2;
-  /* NCI 2.0 - End */
 
   static const uint8_t UICC_HOST_ID = 0x02;
   static const uint8_t UICC2_HOST_ID = 0x80;
   static const uint8_t DH_HOST_ID = 0x00;
   static const uint8_t ESE_HOST_ID = 0xC0;
 
-  /* NCI 2.0 - Begin */
   static const uint8_t NFCEE_ID_UICC1 = 0x81;
   static const uint8_t NFCEE_ID_ESE = 0x82;
   static const uint8_t NFCEE_ID_UICC2 = 0x83;
-  /* NCI 2.0 - End */
 
   static const uint8_t READER_IDX = 0;
   static const uint8_t CE_IDX = 1;
@@ -124,9 +116,7 @@ class NfcStExtensions {
   static const uint8_t DH_IDX = 0;
   static const uint8_t UICC_IDX = 1;
   static const uint8_t ESE_IDX = 2;
-  /* NCI 2.0 - Begin */
   static const uint8_t MAX_NB_HOSTS = 4;
-  /* NCI 2.0 - End */
 
   static const uint8_t DH_HCI_ID = 0x01;
 
@@ -138,20 +128,15 @@ class NfcStExtensions {
 
   tJNI_PIPES_INFO mPipesInfo[MAX_NB_HOSTS];
 
-  /* NCI 2.0 - Begin */
   uint32_t mFwInfo;
   uint16_t mHwInfo;
-  /* NCI 2.0 - End */
 
-  /* NCI 2.0 - Begin */
   void setCoreResetNtfInfo(uint8_t* ptr_manu_info);
   void initializeRfConfig();
   int getCustomerData(uint8_t* customerData);
-  /* NCI 2.0 - End */
 
   void setReaderMode(bool enabled);
 
-  /* NCI 2.0 - Begin */
   /*******************************************************************************
   **
   ** Function:        callbackVsActionRequest
@@ -162,7 +147,6 @@ class NfcStExtensions {
   **
   *******************************************************************************/
   static void nfaVsCbActionRequest(uint8_t oid, uint16_t len, uint8_t* p_msg);
-  /* NCI 2.0 - End */
 
   /*******************************************************************************
    **
@@ -216,7 +200,6 @@ class NfcStExtensions {
    *******************************************************************************/
   int getATR(uint8_t* atr);
 
-  /* NCI 2.0 - Begin */
   /*******************************************************************************
    **
    ** Function:        getProprietaryConfigSettings
@@ -242,7 +225,6 @@ class NfcStExtensions {
    *******************************************************************************/
   void setProprietaryConfigSettings(int prop_config_id, int byteNb, int bitNb,
                                     bool status);
-  /* NCI 2.0 - End */
 
   /*******************************************************************************
    **
@@ -496,9 +478,7 @@ class NfcStExtensions {
    ** Returns:         None.
    **
    *******************************************************************************/
-  /* NCI 2.0 - Begin */
   bool getPipesInfo(void);
-  /* NCI 2.0 - End */
 
   /*******************************************************************************
    **
@@ -656,7 +636,6 @@ class NfcStExtensions {
    *******************************************************************************/
   bool checkListenAPassiveOnSE();
 
-  /* NCI 2.0 - Begin */
   /*******************************************************************************
    **
    ** Function:        getAvailableHciHostList
@@ -792,6 +771,23 @@ class NfcStExtensions {
   void StIntfActivatedNtfEnable(bool enable);
   void notifyIntfActivatedEvent(uint8_t len, uint8_t* pdata);
 
+  bool getIsRecovery();
+
+  /*******************************************************************************
+   **
+   ** Function:        stPollingLoopSpyManagerEnable
+   **
+   ** Description:    Enable / disable collection of the readers polling loop
+   *data
+   **
+   ** Returns:         void
+   **
+   *******************************************************************************/
+  void stPollingLoopSpyManagerEnable(bool enable);
+
+  bool setObserverMode(bool enable);
+  bool getObserverMode();
+
  private:
   static const uint8_t OID_ST_VS_CMD = 0x2;
   static const uint8_t OID_ST_TEST_CMD = 0x3;
@@ -803,13 +799,11 @@ class NfcStExtensions {
 
   static const uint8_t DH_ID = 0x01;
 
-  /* NCI 2.0 - Begin */
   static const uint8_t NFCC_CONFIGURATION = 0x01;
   static const uint8_t HW_CONFIGURATION = 0x02;
   static const uint8_t TEST_CONFIGURATION = 0x11;
   static const uint8_t NFCC_CONFIGURATION_REG_SIZE = 0x05;
   static const uint8_t TEST_CONFIGURATION_REG_SIZE = 0x1C;
-  /* NCI 2.0 - End */
 
   static const uint8_t LOOPBACK_GATE_ID = 0x4;
 
@@ -825,10 +819,8 @@ class NfcStExtensions {
   SyncEvent mNfaHciGetRegRspEvent;
   SyncEvent mHciRspRcvdEvent;
 
-  /* NCI 2.0 - Begin */
   SyncEvent mVsActionRequestEvent;
   SyncEvent mVsCallbackEvent;
-  /* NCI 2.0 - End */
   SyncEvent mNfaHciEventRcvdEvent;
   SyncEvent mNfaHciRegisterEvent;
   SyncEvent mNfaHciClosePipeEvent;
@@ -851,34 +843,21 @@ class NfcStExtensions {
   uint8_t* mNfaConfigPtr;
 
   tJNI_VDC_MEAS_CONFIG mVdcMeasConfig;
-
   tJNI_ID_MGMT_INFO mIdMgmtInfo;
-
   uint8_t mCrcConfig[CRC_CONFIG_SIZE];
-
   tJNI_ID_MGMT_INFO mLoopbackInfo;
-
   uint8_t mFwVersion[FW_VERSION_SIZE];
-
   uint16_t mRspSize;
-
   tJNI_RF_CONFIG mRfConfig;
-
   uint8_t mTargetHostId;
-
-  /* NCI 2.0 - Begin */
   bool mCeOnSwitchOffState;
-  /* NCI 2.0 - End */
   tJNI_NFCC_CONFIG mNfccConfig;
-
-  /* NCI 2.0 - Begin */
   tJNI_PROP_CONFIG mPropConfig;
   uint8_t mPropConfigLen;
 
   uint8_t* mPropTestRspPtr;
   uint16_t mPropTestRspLen;
   uint8_t mCustomerData[8];
-  /* NCI 2.0 - End */
 
   tNFA_HANDLE mNfaStExtHciHandle;
   static const char* APP_NAME;
@@ -1032,6 +1011,46 @@ class NfcStExtensions {
   static void sendRawDeAuthNtf(void);
   bool mIsExtRawMode;
 
+  bool mIsRecovery;
+  bool mCollectReaderPollingLoopData;
+#define RPL_OBSERVER_DURATION_MS 100
+#define RPL_OBSERVER_RESET_S 2
+  // state machine of the algorithm
+  int mRPLState;
+#define RPL_ST_OBSERVER 0
+#define RPL_ST_TRANSACT 1
+  // Log parsing will notify the thread on each:
+  // - field on
+  // - field off
+  // - discovery stopped
+  // - unregistering, need to stop.
+  // The thread manages the transitions of the state machine.
+  SyncEvent mRPLSync;
+  uint32_t mRPLLastFieldOnTs;    // FW time reference
+  uint32_t mRPLLastFieldOffTs;   // FW time reference
+  uint32_t mRPLLastDiscoStopTs;  // FW time reference
+  bool mRPLUnregistering;
+  pthread_t mRPLThread;
+  static void* RPLWorker(NfcStExtensions* inst);
+// Events to build the string for service while state RPL_ST_OBSERVER
+// - only if mRPLNbEvents < 50
+// - and mRPLLastEventTs > mRPLLastDiscoStopTs
+#define RPL_MAX_EVENTS 50
+#define RPL_STR_MAXLEN ((RPL_MAX_EVENTS * (3 + 1 + 6 + 1)) + 1)
+  char* mRPLString;
+  int mRPLStringIndex;
+  int mRPLNbEvents;
+  uint32_t mRPLLastEventTs;  // FW time reference
+
+  bool mIsObserverMode;
+  bool needUnmuteTechForObserverMode();
+
+  void StRPLAddOneEventLocked(char type, uint8_t gain, uint32_t ts);
+
+  int FwTsDiffToUs(uint32_t fwtsstart, uint32_t fwtsend);
+  void StHandlePollingLoopData(uint8_t format, uint16_t data_len,
+                               uint8_t* p_data, bool last);
+
   /*******************************************************************************
    **
    ** Function:        updatePowerMode
@@ -1042,9 +1061,7 @@ class NfcStExtensions {
    ** Returns:         Info to know if listen mask has changed or not
    **
    *******************************************************************************/
-  /* NCI 2.0 - Begin */
   void updateSwitchOffMode();
-  /* NCI 2.0 - End */
 
   /*******************************************************************************
   **

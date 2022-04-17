@@ -29,6 +29,7 @@ import android.graphics.drawable.Drawable;
 import android.nfc.NfcAdapter;
 import android.nfc.cardemulation.CardEmulation;
 import android.os.Bundle;
+import android.os.UserHandle;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -40,14 +41,15 @@ import android.widget.BaseAdapter;
 import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
-import com.android.internal.R;
-import com.android.internal.app.AlertActivity;
-import com.android.internal.app.AlertController;
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.st.android.nfc_extensions.StApduServiceInfo;
 import java.util.ArrayList;
 import java.util.List;
 
-public class AppChooserActivity extends AlertActivity implements AdapterView.OnItemClickListener {
+public class AppChooserActivity extends AppCompatActivity
+        implements AdapterView.OnItemClickListener {
 
     static final String TAG = "HCENfc_AppChooserActivity";
     static final boolean DBG = true;
@@ -57,6 +59,7 @@ public class AppChooserActivity extends AlertActivity implements AdapterView.OnI
     public static final String EXTRA_FAILED_COMPONENT = "failed_component";
 
     private int mIconSize;
+    private TextView mTextView;
     private ListView mListView;
     private ListAdapter mListAdapter;
     private CardEmulation mCardEmuManager;
@@ -84,15 +87,11 @@ public class AppChooserActivity extends AlertActivity implements AdapterView.OnI
 
         super.onCreate(savedInstanceState);
 
-        if (DBG) Log.d(TAG, "onCreate()");
-
-        setTheme(com.android.nfcstm.R.style.DialogAlertDayNight);
-
         IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
         registerReceiver(mReceiver, filter);
 
         if ((options == null || options.size() == 0) && failedComponent == null) {
-            Log.e(TAG, "No components passed in.");
+            Log.e(TAG, "onCreate() - No components passed in");
             finish();
             return;
         }
@@ -102,7 +101,6 @@ public class AppChooserActivity extends AlertActivity implements AdapterView.OnI
 
         final NfcAdapter adapter = NfcAdapter.getDefaultAdapter(this);
         mCardEmuManager = CardEmulation.getInstance(adapter);
-        AlertController.AlertParams ap = mAlertParams;
 
         final ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
         mIconSize = am.getLauncherLargeIconSize();
@@ -113,6 +111,27 @@ public class AppChooserActivity extends AlertActivity implements AdapterView.OnI
         // 3. No failed component and alternatives: pick alternative
         PackageManager pm = getPackageManager();
 
+        setContentView(com.android.nfcstm.R.layout.cardemu_resolver_bottomsheet);
+
+        findViewById(com.android.nfcstm.R.id.touch_outside).setOnClickListener(v -> finish());
+        BottomSheetBehavior.from(findViewById(com.android.nfcstm.R.id.bottom_sheet))
+                .setBottomSheetCallback(
+                        new BottomSheetBehavior.BottomSheetCallback() {
+                            @Override
+                            public void onStateChanged(@NonNull View bottomSheet, int newState) {
+                                switch (newState) {
+                                    case BottomSheetBehavior.STATE_HIDDEN:
+                                        finish();
+                                        break;
+                                }
+                            }
+
+                            @Override
+                            public void onSlide(@NonNull View bottomSheet, float slideOffset) {
+                                // no op
+                            }
+                        });
+
         CharSequence applicationLabel = "unknown";
         if (failedComponent != null) {
             try {
@@ -121,30 +140,20 @@ public class AppChooserActivity extends AlertActivity implements AdapterView.OnI
             } catch (NameNotFoundException e) {
             }
         }
+        mTextView = (TextView) findViewById(com.android.nfcstm.R.id.appchooser_text);
         if (options.size() == 0 && failedComponent != null) {
             String formatString = getString(com.android.nfcstm.R.string.transaction_failure);
-            ap.mTitle = "";
-            ap.mMessage = String.format(formatString, applicationLabel);
-            ap.mPositiveButtonText = getString(R.string.ok);
-            setupAlert();
+            mTextView.setText(String.format(formatString, applicationLabel));
         } else {
             mListAdapter = new ListAdapter(this, options);
             if (failedComponent != null) {
                 String formatString = getString(com.android.nfcstm.R.string.could_not_use_app);
-                ap.mTitle = String.format(formatString, applicationLabel);
-                ap.mNegativeButtonText = getString(R.string.cancel);
-            } else {
-                if (CardEmulation.CATEGORY_PAYMENT.equals(category)) {
-                    ap.mTitle = getString(com.android.nfcstm.R.string.pay_with);
-                } else {
-                    ap.mTitle = getString(com.android.nfcstm.R.string.complete_with);
-                }
+                mTextView.setText(String.format(formatString, applicationLabel));
             }
-            ap.mView = getLayoutInflater().inflate(com.android.nfcstm.R.layout.cardemu_resolver, null);
 
-            mListView = (ListView) ap.mView.findViewById(com.android.nfcstm.R.id.resolver_list);
+            mListView = (ListView) findViewById(com.android.nfcstm.R.id.resolver_list);
+            mListView.setDivider(getResources().getDrawable(android.R.color.transparent));
             if (isPayment) {
-                mListView.setDivider(getResources().getDrawable(android.R.color.transparent));
                 int height = (int) (getResources().getDisplayMetrics().density * 16);
                 mListView.setDividerHeight(height);
             } else {
@@ -152,18 +161,15 @@ public class AppChooserActivity extends AlertActivity implements AdapterView.OnI
             }
             mListView.setAdapter(mListAdapter);
             mListView.setOnItemClickListener(this);
-
-            setupAlert();
         }
         Window window = getWindow();
+        window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
         window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-
         if (DBG) Log.d(TAG, "onCreate()");
-
         Intent intent = getIntent();
         ArrayList<StApduServiceInfo> services =
                 intent.getParcelableArrayListExtra(EXTRA_APDU_SERVICES);
@@ -174,11 +180,12 @@ public class AppChooserActivity extends AlertActivity implements AdapterView.OnI
 
     @Override
     public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-
         if (DBG) Log.d(TAG, "onItemClick()");
 
         DisplayAppInfo info = (DisplayAppInfo) mListAdapter.getItem(position);
-        mCardEmuManager.setDefaultForNextTap(info.serviceInfo.getComponent());
+        mCardEmuManager.setDefaultForNextTap(
+                UserHandle.getUserHandleForUid(info.serviceInfo.getUid()).getIdentifier(),
+                info.serviceInfo.getComponent());
         Intent dialogIntent = new Intent(this, TapAgainDialog.class);
         dialogIntent.putExtra(TapAgainDialog.EXTRA_CATEGORY, mCategory);
         dialogIntent.putExtra(TapAgainDialog.EXTRA_APDU_SERVICE, info.serviceInfo);
@@ -194,7 +201,6 @@ public class AppChooserActivity extends AlertActivity implements AdapterView.OnI
 
         public DisplayAppInfo(
                 StApduServiceInfo serviceInfo, CharSequence label, Drawable icon, Drawable banner) {
-            if (DBG) Log.d(TAG, "DisplayAppInfo - constructor");
             this.serviceInfo = serviceInfo;
             displayIcon = icon;
             displayLabel = label;
@@ -208,7 +214,6 @@ public class AppChooserActivity extends AlertActivity implements AdapterView.OnI
         private List<DisplayAppInfo> mList;
 
         public ListAdapter(Context context, ArrayList<StApduServiceInfo> services) {
-            if (DBG) Log.d(TAG, "ListAdapter - constructor");
             mInflater = (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
             // For each component, get the corresponding app name and icon
             PackageManager pm = getPackageManager();
@@ -217,12 +222,21 @@ public class AppChooserActivity extends AlertActivity implements AdapterView.OnI
             for (StApduServiceInfo service : services) {
                 CharSequence label = service.getGsmaDescription(pm);
                 if (label == null) label = service.loadLabel(pm);
-                Drawable icon = service.loadIcon(pm);
+
+                Drawable icon =
+                        pm.getUserBadgedIcon(
+                                service.loadIcon(pm),
+                                UserHandle.getUserHandleForUid(service.getUid()));
+
                 Drawable banner = null;
                 if (mIsPayment) {
                     banner = service.loadBanner(pm);
                     if (banner == null) {
-                        Log.e(TAG, "Not showing " + label + " because no banner specified.");
+                        Log.e(
+                                TAG,
+                                "ListAdapter() - Not showing "
+                                        + label
+                                        + " because no banner specified.");
                         continue;
                     }
                 }
@@ -269,8 +283,6 @@ public class AppChooserActivity extends AlertActivity implements AdapterView.OnI
             if (mIsPayment) {
                 holder.banner.setImageDrawable(appInfo.displayBanner);
             } else {
-                ViewGroup.LayoutParams lp = holder.icon.getLayoutParams();
-                lp.width = lp.height = mIconSize;
                 holder.icon.setImageDrawable(appInfo.displayIcon);
                 holder.text.setText(appInfo.displayLabel);
             }

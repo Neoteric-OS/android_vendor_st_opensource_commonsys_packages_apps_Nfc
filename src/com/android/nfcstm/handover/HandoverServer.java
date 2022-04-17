@@ -18,6 +18,7 @@ package com.android.nfcstm.handover;
 import android.content.Context;
 import android.nfc.FormatException;
 import android.nfc.NdefMessage;
+import android.os.SystemProperties;
 import android.util.Log;
 import com.android.nfcstm.DeviceHost.LlcpServerSocket;
 import com.android.nfcstm.DeviceHost.LlcpSocket;
@@ -31,7 +32,7 @@ import java.util.Arrays;
 public final class HandoverServer {
     static final String HANDOVER_SERVICE_NAME = "urn:nfc:sn:handover";
     static final String TAG = "HandoverServer";
-    static final Boolean DBG = false;
+    static final Boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
 
     static final int MIU = 128;
 

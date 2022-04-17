@@ -34,6 +34,7 @@
  */
 package com.android.nfcstm.cardemulation;
 
+import android.os.SystemProperties;
 import android.util.Log;
 import android.util.SparseArray;
 import android.util.proto.ProtoOutputStream;
@@ -52,9 +53,7 @@ public class AidRoutingManager {
 
     static final String TAG = "HCENfc_AidRoutingManager";
 
-    static final boolean DBG = true;
-    static final boolean DBG2 =
-            DBG && android.os.SystemProperties.get("persist.st_nfc_debug").equals("1");
+    static final boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
 
     static final int ROUTE_HOST = 0x00;
 
@@ -146,7 +145,7 @@ public class AidRoutingManager {
         return mAidMatchingSupport == AID_MATCHING_EXACT_OR_SUBSET_OR_PREFIX;
     }
 
-    public int calculateAidRouteSize(HashMap<String, AidEntry> routeCache) {
+    public int calculateAidRouteSize(int defaultRoute, HashMap<String, AidEntry> routeCache) {
         // TAG + ROUTE + LENGTH_BYTE + POWER
         int AID_HDR_LENGTH = 0x04;
         int routeTableSize = 0x00;
@@ -159,12 +158,18 @@ public class AidRoutingManager {
                 routeTableSize += (aid.length() / 0x02) + AID_HDR_LENGTH;
             }
         }
-        if (DBG) Log.d(TAG, "calculateAidRouteSize() - size for current route: " + routeTableSize);
+        if (DBG)
+            Log.d(
+                    TAG,
+                    "calculateAidRouteSize() - size for route "
+                            + String.format("%02X", defaultRoute)
+                            + ": "
+                            + routeTableSize);
         return routeTableSize;
     }
 
     public boolean isOnHostDefaultRoute() {
-        if (DBG) Log.d(TAG, "isOnHostDefaultRoute()");
+        if (DBG) Log.d(TAG, "isOnHostDefaultRoute() - " + (mDefaultRoute == ROUTE_HOST));
         return (mDefaultRoute == ROUTE_HOST);
     }
 
@@ -200,13 +205,6 @@ public class AidRoutingManager {
 
     HashMap<String, AidEntry> computeRouteCache(
             HashMap<String, AidEntry> aidMap, int defaultRoute) {
-
-        if (DBG)
-            Log.d(
-                    TAG,
-                    "computeRouteCache() - Computing route cache for defaultRoute: "
-                            + String.format("0x%02X", defaultRoute));
-
         HashMap<String, AidEntry> aidRoutingTableCache =
                 new HashMap<String, AidEntry>(aidMap.size());
 
@@ -259,15 +257,16 @@ public class AidRoutingManager {
         for (int i = 0; i < mAidRoutingTable.size(); i++) {
             int route = mAidRoutingTable.keyAt(i);
 
-            if (DBG)
-                Log.d(
-                        TAG,
-                        "computeRouteCache() - defaultRoute: "
-                                + String.format("0x%02X", defaultRoute)
-                                + ", route: "
-                                + String.format("0x%02X", route));
-
             if (route != defaultRoute) {
+
+                if (DBG)
+                    Log.d(
+                            TAG,
+                            "computeRouteCache() - defaultRoute: "
+                                    + String.format("0x%02X", defaultRoute)
+                                    + ", route: "
+                                    + String.format("0x%02X", route));
+
                 Set<String> aidsForRoute = mAidRoutingTable.get(route);
                 for (String aid : aidsForRoute) {
                     if (aid.endsWith("*")) {
@@ -323,8 +322,6 @@ public class AidRoutingManager {
                         aidRoutingTableCache.put(aid, aidMap.get(aid));
                     }
                 }
-            } else if (DBG) {
-                Log.d(TAG, "computeRouteCache() - Same as default route, do nothing");
             }
         }
 
@@ -360,7 +357,6 @@ public class AidRoutingManager {
             entry.aidInfo = RegisteredAidCache.AID_ROUTE_QUAL_PREFIX;
             entry.power = default_route_power_state;
             aidRoutingTableCache.put(emptyAid, entry);
-            if (DBG) Log.d(TAG, "computeRouteCache() - Add emptyAid into AidRoutingTable");
         }
         // }
 
@@ -441,10 +437,16 @@ public class AidRoutingManager {
                 if (offHostSE == null) {
                     route = mDefaultOffHostRoute;
                 } else {
-                    route = getRouteForSecureElement(offHostSE);
-                    if (route == 0) {
-                        Log.e(TAG, "configureRouting() - Invalid Off host Aid Entry " + offHostSE);
-                        continue;
+                    if (offHostSE.equals("Ndef-Nfcee")) {
+                        route = 0x10;
+                    } else {
+                        route = getRouteForSecureElement(offHostSE);
+                        if (route == 0) {
+                            Log.e(
+                                    TAG,
+                                    "configureRouting() - Invalid Off host Aid Entry " + offHostSE);
+                            continue;
+                        }
                     }
                 }
             }
@@ -514,18 +516,14 @@ public class AidRoutingManager {
 
             mMaxAidRoutingTableSize = NfcService.getInstance().getAidRoutingTableSize();
 
-            if (DBG)
-                Log.d(
-                        TAG,
-                        "configureRouting() - mMaxAidRoutingTableSize: " + mMaxAidRoutingTableSize);
-
             // calculate AidRoutingTableSize for existing route destination
             for (int index = 0; index < seList.size(); index++) {
                 mDefaultRoute = seList.get(index);
 
                 aidRoutingTableCache = computeRouteCache(aidMap, mDefaultRoute);
 
-                if (calculateAidRouteSize(aidRoutingTableCache) <= mMaxAidRoutingTableSize) {
+                if (calculateAidRouteSize(mDefaultRoute, aidRoutingTableCache)
+                        <= mMaxAidRoutingTableSize) {
                     if (DBG)
                         Log.d(
                                 TAG,
@@ -539,10 +537,7 @@ public class AidRoutingManager {
             // Compute routeCache for all routes
             // Needed for overflow handling
             {
-                if (DBG)
-                    Log.d(
-                            TAG,
-                            "configureRouting() - ---------> Route cache for overflow (B) <---------");
+                if (DBG) Log.d(TAG, "configureRouting() - Route cache for overflow (B) <---------");
 
                 int defaultRoute;
                 HashMap<String, AidEntry> aidRTCache = new HashMap<String, AidEntry>(aidMap.size());
@@ -556,10 +551,7 @@ public class AidRoutingManager {
                             aidRTCache,
                             defaultRoute == 0 ? 0 : (defaultRoute & 0x81) == 0x81 ? 0x02 : 0x01);
                 }
-                if (DBG)
-                    Log.d(
-                            TAG,
-                            "configureRouting() - ---------> Route cache for overflow (E) <---------");
+                if (DBG) Log.d(TAG, "configureRouting() - Route cache for overflow (E) <---------");
             }
 
             if (aidRouteResolved == true) {
@@ -606,15 +598,6 @@ public class AidRoutingManager {
                 int aidType = aidEntry.getValue().aidInfo;
                 String aid = aidEntry.getKey();
                 int power = aidEntry.getValue().power;
-                if (DBG)
-                    Log.d(
-                            TAG,
-                            "commit() -  aid: "
-                                    + aid
-                                    + ", route: "
-                                    + String.format("0x%02X", route)
-                                    + ", power state:"
-                                    + power);
 
                 NfcService.getInstance().routeAids(aid, route, aidType, power);
             }
@@ -704,40 +687,12 @@ public class AidRoutingManager {
             HashMap<String, AidEntry> tempRouteCache =
                     new HashMap<String, AidEntry>(routeCache.size());
             tempRouteCache.putAll(routeCache);
-            routesize = calculateAidRouteSize(tempRouteCache);
-
-            if (DBG)
-                Log.d(
-                        TAG,
-                        "DefaultAidRouteResolveCache - updateDefaultAidRouteCache() - Current route: "
-                                + route
-                                + ", size: "
-                                + routesize);
-
+            routesize = calculateAidRouteSize(route, tempRouteCache);
             aidCacheSize.put(route, routesize);
-            // Log.d(TAG, "DefaultAidRouteResolveCache -
-            // updateDefaultAidRouteCache() - Temporary
-            // Routing table size: " +routesize);
         }
 
         public int getAidCacheForRoute(int route) {
-            int size;
-
-            if (route == 0x00) {
-                size = aidCacheSize.get(0x00);
-            } else {
-                size = aidCacheSize.get(0x02);
-            }
-
-            if (DBG)
-                Log.d(
-                        TAG,
-                        "DefaultAidRouteResolveCache - getAidCacheForRoute() - route: "
-                                + route
-                                + ", size: "
-                                + size);
-
-            return size;
+            return aidCacheSize.get(route);
         }
     }
 }

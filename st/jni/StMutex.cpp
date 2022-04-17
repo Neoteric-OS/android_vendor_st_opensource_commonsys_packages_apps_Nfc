@@ -43,17 +43,17 @@ Mutex::Mutex() {
   memset(&mMutex, 0, sizeof(mMutex));
   int res = pthread_mutexattr_init(&attr);
   if (res != 0) {
-    LOG(ERROR) << StringPrintf("Mutex::Mutex: fail attr init; error=0x%X", res);
+    LOG(ERROR) << StringPrintf("%s; fail attr init; error=0x%X", __func__, res);
   } else {
     res = pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
     if (res != 0) {
-      LOG(ERROR) << StringPrintf("Mutex::Mutex: fail attr set; error=0x%X",
+      LOG(ERROR) << StringPrintf("%s; fail attr set; error=0x%X", __func__,
                                  res);
     }
   }
   res = pthread_mutex_init(&mMutex, &attr);
   if (res != 0) {
-    LOG(ERROR) << StringPrintf("Mutex::Mutex: fail init; error=0x%X", res);
+    LOG(ERROR) << StringPrintf("%s; fail init; error=0x%X", __func__, res);
   }
 }
 
@@ -69,7 +69,7 @@ Mutex::Mutex() {
 Mutex::~Mutex() {
   int res = pthread_mutex_destroy(&mMutex);
   if (res != 0) {
-    LOG(ERROR) << StringPrintf("Mutex::~Mutex: fail destroy; error=0x%X", res);
+    LOG(ERROR) << StringPrintf("%s; fail destroy; error=0x%X", __func__, res);
   }
 }
 
@@ -85,7 +85,7 @@ Mutex::~Mutex() {
 void Mutex::lock() {
   int res = pthread_mutex_lock(&mMutex);
   if (res != 0) {
-    LOG(ERROR) << StringPrintf("Mutex::lock: fail lock; error=0x%X", res);
+    LOG(ERROR) << StringPrintf("%s; fail lock; error=0x%X", __func__, res);
   }
 }
 
@@ -101,7 +101,7 @@ void Mutex::lock() {
 void Mutex::unlock() {
   int res = pthread_mutex_unlock(&mMutex);
   if (res != 0) {
-    LOG(ERROR) << StringPrintf("Mutex::unlock: fail unlock; error=0x%X", res);
+    LOG(ERROR) << StringPrintf("%s; fail unlock; error=0x%X", __func__, res);
   }
 }
 
@@ -117,7 +117,7 @@ void Mutex::unlock() {
 bool Mutex::tryLock() {
   int res = pthread_mutex_trylock(&mMutex);
   if ((res != 0) && (res != EBUSY)) {
-    LOG(ERROR) << StringPrintf("Mutex::tryLock: error=0x%X", res);
+    LOG(ERROR) << StringPrintf("%s; error=0x%X", __func__, res);
   }
   return res == 0;
 }

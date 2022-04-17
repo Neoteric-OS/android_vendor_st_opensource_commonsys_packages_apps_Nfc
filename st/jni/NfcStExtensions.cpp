@@ -52,9 +52,7 @@ namespace android {
 extern void startRfDiscovery(bool isStart);
 extern void pollingChanged(int discoveryEnabled, int pollingEnabled,
                            int p2pEnabled);
-/* NCI 2.0 - Begin */
 extern bool isDiscoveryStarted();
-/* NCI 2.0 - End */
 }  // namespace android
 
 //////////////////////////////////////////////
@@ -83,13 +81,32 @@ NfcStExtensions::NfcStExtensions() {
   mWaitingForDmEvent = false;
   mRfConfig.modeBitmap = 0;
   memset(mRfConfig.techArray, 0, sizeof(mRfConfig.techArray));
-  //  mDefaultOffHostRoute = UICC_HOST_ID;
   mDefaultIsoTechRoute = NfcConfig::getUnsigned(NAME_DEFAULT_ROUTE, 0x02);
   mIsP2pPaused = false;
   mCreatedPipeId = 0xFF;
-  /* NCI 2.0 - Begin */
   memset(&mCustomerData, 0, sizeof(mCustomerData));
-  /* NCI 2.0 - End */
+
+  mDynRotateFieldSts = false;
+  mMatchSelectState = 0;
+  mMatchSelectedCurrent = 0;
+  mMatchSelectPartialCurrent = 0;
+  mMatchSelectPartialLastChainedByte = 0;
+  mMatchSelectLastFieldOffTs = 0;
+  mSend1stRxFlags = 0;
+  mSend1stRxTech = 0;
+  mSend1stRxParam = 0;
+  mIsEseActiveForWA = false;
+  mEseCardBOnlyIsAllowed = false;
+  mEseActivationOngoing = false;
+  mStMonitorSeActivationState = 0;
+  mLastSentLen = 0;
+  mLastSentCounter = 0;
+  mLastReceivedParamLen = 0;
+  mStClfFieldMonitorInRemoteField = false;
+  mStClfFieldMonitorInRemoteFieldPrev = false;
+  mStClfFieldMonitorThread = (pthread_t)NULL;
+  mRawRfPropStatus = 0;
+  mIsExtRawMode = false;
 }
 
 /*******************************************************************************
@@ -115,7 +132,7 @@ NfcStExtensions::~NfcStExtensions() {}
  *******************************************************************************/
 void NfcStExtensions::initialize(nfc_jni_native_data* native) {
   static const char fn[] = "NfcStExtensions::initialize";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
 
   unsigned long num;
   tNFA_STATUS nfaStat;
@@ -133,6 +150,8 @@ void NfcStExtensions::initialize(nfc_jni_native_data* native) {
   sRfDynParamSet = 0;
   mDynRotatedByFw = 0;
 
+  mIsRecovery = false;
+
   ///////////////////////////////////////////////////////////
   // Reading all tech configurations from configuration file
   //////////////////////////////////////////////////////////
@@ -144,23 +163,15 @@ void NfcStExtensions::initialize(nfc_jni_native_data* native) {
   //////////////
 
   num = NfcConfig::getUnsigned(NAME_POLLING_TECH_MASK, DEFAULT_TECH_MASK);
-
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: tag polling tech mask=0x%lX", fn, num);
-
   if (num) {  // Poll mode
-    /* NCI 2.0 - Begin */
     mRfConfig.modeBitmap |= (0x1 << READER_IDX);
-    /* NCI 2.0 - End */
     mRfConfig.techArray[READER_IDX] = num;
 
     // P2P poll mode
-    /* NCI 2.0 - Begin */
     if ((num & (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_F |
                 NFA_TECHNOLOGY_MASK_ACTIVE)) !=
         0) {  // Check if some tech for p2p may be here
       mRfConfig.modeBitmap |= (0x1 << P2P_POLL_IDX);
-      /* NCI 2.0 - End */
       mRfConfig.techArray[P2P_POLL_IDX] = num & 0xC5;
     }
   }
@@ -168,102 +179,46 @@ void NfcStExtensions::initialize(nfc_jni_native_data* native) {
   //////////////
   // Listen mode
   //////////////
-
   mHostListenTechMask =
       NfcConfig::getUnsigned(NAME_HOST_LISTEN_TECH_MASK,
                              NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_F);
 
-  // UICC tech?
-  //  num = NfcConfig::getUnsigned("UICC_LISTEN_TECH_MASK", 0x00);
-  //  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-  //          "%s: Requested UICC listen mask: 0x%lX", fn, num);
-  //
-  //  if (num != 0) {
-  /* NCI 2.0 - Begin */
   mRfConfig.modeBitmap |= (0x1 << CE_IDX);
-  /* NCI 2.0 - End */
   mRfConfig.techArray[CE_IDX] =
       mHostListenTechMask & HCE_TECH_MASK;  // Allow tech A/B
-  //  }
-
-  // HCE CE type?
-  //  if (mHceCapable) { // CE mode
-  //    /* NCI 2.0 - Begin */
-  //    mRfConfig.modeBitmap |= (0x1 << CE_IDX);
-  //    mRfConfig.techArray[CE_IDX] |= StRoutingManager::getInstance()
-  //            .getHceIsoDepMask(); //LISTEN_A and LISTEN_B
-  //    /* NCI 2.0 - End */
-  //  }
 
   /////////////
   // P2P listen
   /////////////
   num = NfcConfig::getUnsigned("P2P_LISTEN_TECH_MASK", 0x6F);
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: tag polling tech mask=0x%lX", fn, num);
-
   if (num) {  // P2P listen mode
-    /* NCI 2.0 - Begin */
     mRfConfig.modeBitmap |= (0x1 << P2P_LISTEN_IDX);
-    /* NCI 2.0 - End */
     mRfConfig.techArray[P2P_LISTEN_IDX] = num;
   }
 
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: mRfConfig.techArray[READER_IDX] = 0x%X", fn,
+      << StringPrintf("%s; mRfConfig.techArray[READER_IDX] = 0x%X", fn,
                       mRfConfig.techArray[READER_IDX]);
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: mRfConfig.techArray[CE_IDX] = 0x%X", fn,
+      << StringPrintf("%s; mRfConfig.techArray[CE_IDX] = 0x%X", fn,
                       mRfConfig.techArray[CE_IDX]);
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: mRfConfig.techArray[P2P_LISTEN_IDX] = 0x%X", fn,
+      << StringPrintf("%s; mRfConfig.techArray[P2P_LISTEN_IDX] = 0x%X", fn,
                       mRfConfig.techArray[P2P_LISTEN_IDX]);
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: mRfConfig.techArray[P2P_POLL_IDX] = 0x%X", fn,
+      << StringPrintf("%s; mRfConfig.techArray[P2P_POLL_IDX] = 0x%X", fn,
                       mRfConfig.techArray[P2P_POLL_IDX]);
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: mRfConfig.modeBitmap = 0x%X", fn, mRfConfig.modeBitmap);
+      "%s; mRfConfig.modeBitmap = 0x%X", fn, mRfConfig.modeBitmap);
 
   mVdcMeasConfig.isRfFieldOn = false;
-
-  // Reading trace configuration
-  //	num = NfcConfig::getUnsigned("P2P_LISTEN_TECH_MASK", 0x6F);
-  //    if (GetNumValue(NAME_APPL_TRACE_LEVEL, &num, sizeof(num))) {
-  //        LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Core stack
-  //        trace level=0x%X", fn, num);
-  //    } else {
-  //        num = 0;
-  //        LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Core stack
-  //        trace level could not read=0x%X", fn, num);
-  //    }
-  //
-  //    if (num) {
-  //        mTraceConfig.coreStack = num;
-  //        LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Stored Core
-  //        stack trace level: %lu", fn, mTraceConfig.coreStack);
-  //    }
-  //
-  //    if (GetNumValue("PROTOCOL_TRACE_LEVEL", &num, sizeof(num))) {
-  //        LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: HAL trace
-  //        level=0x%X", fn, num);
-  //    } else {
-  //        num = 0;
-  //        LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: HAL trace level
-  //        could not read=0x%X", fn, num);
-  //    }
-  //
-  //    if (num) {
-  //        mTraceConfig.hal = num;
-  //        LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Stored HAL
-  //        trace level: %lu", fn, mTraceConfig.hal);
-  //    }
 
   // Register NfcStExtensions for HCI callbacks
   SyncEventGuard guard(mNfaHciRegisterEvent);
 
   nfaStat = NFA_HciRegister(const_cast<char*>(APP_NAME), nfaHciCallback, TRUE);
   if (nfaStat != NFA_STATUS_OK) {
-    LOG(ERROR) << StringPrintf("%s: fail hci register; error=0x%X", fn,
+    LOG(ERROR) << StringPrintf("%s; fail hci register; error=0x%X", fn,
                                nfaStat);
     return;
   }
@@ -274,25 +229,12 @@ void NfcStExtensions::initialize(nfc_jni_native_data* native) {
   num = NfcConfig::getUnsigned("CE_ON_SCREEN_OFF_STATE", 0x00);
   mDesiredScreenOffPowerState = (uint8_t)num;
 
-  // uint32_t value = getNfcSystemProp("nfc.st.ce_on_screen_off");
-  // if (value != DUMMY_SYTEM_PROP_VALUE) {
-  //  mDesiredScreenOffPowerState = value;
-  //}
-
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: Selected Screen Off state 0x%X", fn, mDesiredScreenOffPowerState);
+      "%s; Selected Screen Off state 0x%X", fn, mDesiredScreenOffPowerState);
 
   num = NfcConfig::getUnsigned("CE_ON_SWITCH_OFF_STATE", 0x00);
   mCeOnSwitchOffState = (uint8_t)num;
 
-  // value = getNfcSystemProp("nfc.st.ce_on_Switch_off");
-  // if (value != DUMMY_SYTEM_PROP_VALUE) {
-  //  mCeOnSwitchOffState = value;
-
-  //  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-  //          "%s: user selected Switch Off state 0x%X", fn,
-  //          mCeOnSwitchOffState);
-  //}
   updateSwitchOffMode();
 
   mDynEnabled =
@@ -306,16 +248,16 @@ void NfcStExtensions::initialize(nfc_jni_native_data* native) {
   mDynParamsCycles = NfcConfig::getUnsigned("RF_PARAMS_AUTO_SWITCH_CYCLES", 2);
   {
     DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: try register VS callback", fn);
+        << StringPrintf("%s; try register VS callback", fn);
     nfaStat = NFA_RegVSCback(true, StVsCallback);
     if (nfaStat != NFA_STATUS_OK) {
-      LOG(ERROR) << StringPrintf("%s: fail to register; error=0x%X", fn,
+      LOG(ERROR) << StringPrintf("%s; fail to register; error=0x%X", fn,
                                  nfaStat);
       return;
     }
   }
 
-  LOG(INFO) << StringPrintf("%s - Restart CB registering", __func__);
+  LOG(INFO) << StringPrintf("%s; Restart CB registering", __func__);
   NFA_RegRestartCback(StRestartCallback);
 
   // Do we allow the eSE to open card B gate only ? (ref eSE issue in opening
@@ -337,19 +279,47 @@ void NfcStExtensions::initialize(nfc_jni_native_data* native) {
   mStClfFieldMonitorInRemoteField = false;
   mStClfFieldMonitorInRemoteFieldPrev = false;
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
+  mIsObserverMode = false;
+
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", fn);
 }
 
+/*******************************************************************************
+ **
+ ** Function:        notifyRestart
+ **
+ ** Description:     Notify Stack restart needed.
+ **
+ ** Returns:         None
+ **
+ *******************************************************************************/
 void NfcStExtensions::notifyRestart() {
   JNIEnv* e = NULL;
-  LOG(INFO) << StringPrintf("%s - Restart resquested", __func__);
+  LOG(INFO) << StringPrintf("%s; Restart resquested", __func__);
   ScopedAttach attach(mNativeData->vm, &e);
   if (e == NULL) {
     LOG(ERROR) << StringPrintf("jni env is null");
     return;
   }
+
+  mIsRecovery = true;
+
   e->CallVoidMethod(mNativeData->manager,
-                    android::gCachedNfcManagerNotifyESEUnrecoverable);
+                    android::gCachedNfcManagerNotifyHwErrorReported);
+}
+
+/*******************************************************************************
+ **
+ ** Function:        notifyRestart
+ **
+ ** Description:     Notify Stack restart needed.
+ **
+ ** Returns:         None
+ **
+ *******************************************************************************/
+bool NfcStExtensions::getIsRecovery() {
+  LOG(INFO) << StringPrintf("%s; mIsRecovery: %d", __func__, mIsRecovery);
+  return mIsRecovery;
 }
 
 /*******************************************************************************
@@ -366,6 +336,7 @@ void NfcStExtensions::finalize() {
   mIdMgmtInfo.created = false;
   mIdMgmtInfo.opened = false;
 
+  LOG(INFO) << StringPrintf("%s", __func__);
   {
     tNFA_STATUS nfaStat;
     DLOG_IF(INFO, nfc_debug_enabled) << "try unregister VS callback";
@@ -485,7 +456,6 @@ void NfcStExtensions::abortWaits() {
  ** Returns:         None.
  **
  *******************************************************************************/
-/* NCI 2.0 - Begin */
 static const char* getHostName(int host_id) {
   static const char fn[] = "getHostName";
   static const char* host = "Unknown Host";
@@ -502,13 +472,14 @@ static const char* getHostName(int host_id) {
       break;
     default:
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: Invalid host id!!!", fn);
+          << StringPrintf("%s; Invalid host id!!!", fn);
       break;
   }
 
+  LOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; host_id: %d, host: %s", fn, host_id, host);
   return host;
 }
-/* NCI 2.0 - End */
 
 /*******************************************************************************
  **
@@ -519,9 +490,9 @@ static const char* getHostName(int host_id) {
  ** Returns:         None.
  **
  *******************************************************************************/
-/* NCI 2.0 - Begin */ bool NfcStExtensions::getPipesInfo() {
+bool NfcStExtensions::getPipesInfo() {
   static const char fn[] = "NfcStExtensions::getPipesInfo";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
   int i, idx, j, dhIdx;
   bool infoOk = false;
@@ -541,7 +512,7 @@ static const char* getHostName(int host_id) {
     if (StSecureElement::getInstance().isSEConnected(
             (idx == 1 ? 0x02 : 0xc0)) == true) {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: Requesting info for host %s", fn, host);
+          << StringPrintf("%s; Requesting info for host %s", fn, host);
 
       mPipesInfo[idx].nb_info_rx = 0;
       uint8_t attr = 8 | 2;
@@ -549,7 +520,7 @@ static const char* getHostName(int host_id) {
         uint8_t nfceeId = StSecureElement::getInstance().getSENfceeId(0x02);
 
         LOG_IF(INFO, nfc_debug_enabled)
-            << StringPrintf("%s: Active UICC is at slot 0x%02X", fn, nfceeId);
+            << StringPrintf("%s; Active UICC is at slot 0x%02X", fn, nfceeId);
 
         // we query the active UICC
         switch (nfceeId) {
@@ -568,7 +539,7 @@ static const char* getHostName(int host_id) {
         uint8_t nfceeId = StSecureElement::getInstance().getSENfceeId(0x01);
 
         LOG_IF(INFO, nfc_debug_enabled)
-            << StringPrintf("%s: Active SE is at slot 0x%02X", fn, nfceeId);
+            << StringPrintf("%s; Active SE is at slot 0x%02X", fn, nfceeId);
 
         switch (nfceeId) {
           case 0x82:  // eSE
@@ -588,7 +559,7 @@ static const char* getHostName(int host_id) {
                                   nfaVsCbActionRequest);
       if (nfaStat != NFA_STATUS_OK) {
         LOG(ERROR) << StringPrintf(
-            "%s: NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
+            "%s; NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
       } else {
         mVsActionRequestEvent.wait();
         mIsWaitingEvent.pipeInfo = false;
@@ -627,10 +598,10 @@ static const char* getHostName(int host_id) {
   for (i = 0; i < 3; i++) {
     host = getHostName(i);
     LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s: Found %d pipes for %s", fn, mPipesInfo[i].nb_pipes, host);
+        "%s; Found %d pipes for %s", fn, mPipesInfo[i].nb_pipes, host);
     for (j = 0; j < mPipesInfo[i].nb_pipes; j++) {
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: Info for pipe 0x%x: source host is 0x%x, destination host is "
+          "%s; Info for pipe 0x%x: source host is 0x%x, destination host is "
           "0x%x, gate is 0x%x, state is 0x%x",
           fn, mPipesInfo[i].data[j].pipe_id, mPipesInfo[i].data[j].source_host,
           mPipesInfo[i].data[j].dest_host, mPipesInfo[i].data[j].source_gate,
@@ -638,11 +609,10 @@ static const char* getHostName(int host_id) {
     }
   }
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", fn);
   return infoOk;
 }
-/* NCI 2.0 - End */
-/* NCI 2.0 - Begin */
+
 /*******************************************************************************
  **
  ** Function:        callbackVsActionRequest
@@ -655,20 +625,20 @@ static const char* getHostName(int host_id) {
 void NfcStExtensions::nfaVsCbActionRequest(uint8_t oid, uint16_t len,
                                            uint8_t* p_msg) {
   static const char fn[] = "NfcStExtensions::nfaVsCbActionRequest";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: nfaVsCbActionRequest; oid=0x%X; len = %d", fn, oid, len);
+  LOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; oid=0x%X; len = %d", fn, oid, len);
 
   sStExtensions.mVsActionRequestEvent.start();
   if (sStExtensions.mIsWaitingEvent.pipeInfo == true) {  // Pipes Info
     if (len == 0) {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: PROP_CMD_RSP; No data returned !!!!", fn);
+          << StringPrintf("%s; PROP_CMD_RSP; No data returned !!!!", fn);
     } else {
       int i = 0, nb_pipes = 0;
       int hostIdx = sStExtensions.mTargetHostId;
       int nb_entry = p_msg[6] / 12;
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: nb entry = %d", fn, nb_entry);
+          << StringPrintf("%s; nb entry = %d", fn, nb_entry);
       while (i < nb_entry) {
         if (p_msg[12 * i + 12] != 0) {
           sStExtensions.mPipesInfo[hostIdx].data[nb_pipes].source_host =
@@ -713,7 +683,7 @@ void NfcStExtensions::nfaVsCbActionRequest(uint8_t oid, uint16_t len,
             (uint8_t*)GKI_os_malloc(sStExtensions.mPropTestRspLen);
         if (sStExtensions.mPropTestRspPtr == NULL) {
           LOG(ERROR) << StringPrintf(
-              "%s: Could not allocate memory for mPropTestRspPtr", fn);
+              "%s; Could not allocate memory for mPropTestRspPtr", fn);
           return;
         }
         memcpy(sStExtensions.mPropTestRspPtr, &(p_msg[4]),
@@ -729,7 +699,6 @@ void NfcStExtensions::nfaVsCbActionRequest(uint8_t oid, uint16_t len,
   sStExtensions.mVsActionRequestEvent.notifyOne();
   sStExtensions.mVsActionRequestEvent.end();
 }
-/* NCI 2.0 - End */
 
 /*******************************************************************************
  **
@@ -742,23 +711,21 @@ void NfcStExtensions::nfaVsCbActionRequest(uint8_t oid, uint16_t len,
  *******************************************************************************/
 uint8_t NfcStExtensions::getPipeState(uint8_t pipe_id) {
   static const char fn[] = "NfcStExtensions::getPipeState";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
 
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: Requested state of pipe 0x%x", fn, pipe_id);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; pipe 0x%x", fn, pipe_id);
   int i;
 
   for (i = 0; i < mPipesInfo[DH_IDX].nb_pipes; i++) {
     if (mPipesInfo[DH_IDX].data[i].pipe_id == pipe_id) {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: State of pipe 0x%x is 0x%x", fn, pipe_id,
+          << StringPrintf("%s; State of pipe 0x%x is 0x%x", fn, pipe_id,
                           mPipesInfo[DH_IDX].data[i].pipe_state);
       return mPipesInfo[DH_IDX].data[i].pipe_state;
     }
   }
 
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: Pipe not found in stored data - Not created", fn);
+      << StringPrintf("%s; Pipe not found in stored data - Not created", fn);
   return 0;
 }
 
@@ -773,14 +740,12 @@ uint8_t NfcStExtensions::getPipeState(uint8_t pipe_id) {
  *******************************************************************************/
 uint8_t NfcStExtensions::getPipeIdForGate(uint8_t host_id, uint8_t gate_id) {
   static const char fn[] = "NfcStExtensions::getPipeIdForGate";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
 
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: Requesting pipe id for gate 0x%x on host 0x%x", fn,
+      << StringPrintf("%s; Requesting pipe id for gate 0x%x on host 0x%x", fn,
                       gate_id, host_id);
-  /* NCI 2.0 - Begin */
+
   int i, idx = 0;
-  /* NCI 2.0 - End */
 
   switch (host_id) {
     case DH_HCI_ID:
@@ -804,14 +769,14 @@ uint8_t NfcStExtensions::getPipeIdForGate(uint8_t host_id, uint8_t gate_id) {
   for (i = 0; i < mPipesInfo[idx].nb_pipes; i++) {
     if (mPipesInfo[idx].data[i].source_gate == gate_id) {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: Pipe 0x%x belongs to gate 0x%x", fn,
+          << StringPrintf("%s; Pipe 0x%x belongs to gate 0x%x", fn,
                           mPipesInfo[idx].data[i].pipe_id, gate_id);
       return mPipesInfo[idx].data[i].pipe_id;
     }
   }
 
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: Gate not found in stored data - No pipe created on that gate", fn);
+      "%s; Gate not found in stored data - No pipe created on that gate", fn);
   return 0xFF;  // Invalid pipe Id
 }
 
@@ -826,23 +791,19 @@ uint8_t NfcStExtensions::getPipeIdForGate(uint8_t host_id, uint8_t gate_id) {
  *******************************************************************************/
 uint8_t NfcStExtensions::getHostIdForPipe(uint8_t pipe_id) {
   static const char fn[] = "NfcStExtensions::getHostIdForPipe";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
-
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: Requesting Host id for pipe 0x%x", fn, pipe_id);
   int i;
 
   for (i = 0; i < mPipesInfo[DH_IDX].nb_pipes; i++) {
     if (mPipesInfo[DH_IDX].data[i].pipe_id == pipe_id) {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: Pipe 0x%x belongs to host 0x%x", fn, pipe_id,
+          << StringPrintf("%s; Pipe 0x%x belongs to host 0x%x", fn, pipe_id,
                           mPipesInfo[DH_IDX].data[i].source_host);
       return mPipesInfo[DH_IDX].data[i].source_host;
     }
   }
 
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: Host not found in stored data - Pipe not created", fn);
+      "%s; Host not found in stored data - Pipe not created", fn);
   return 0xFF;  // Invalid host Id
 }
 
@@ -858,15 +819,15 @@ uint8_t NfcStExtensions::getHostIdForPipe(uint8_t pipe_id) {
  *******************************************************************************/
 uint8_t NfcStExtensions::checkGateForHostId(uint8_t gate_id, uint8_t host_id) {
   static const char fn[] = "NfcStExtensions::checkGateForHostId";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
   int i;
 
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: Checking if gate 0x%x exists between DH and host 0x%x", fn, gate_id,
+      "%s; Checking if gate 0x%x exists between DH and host 0x%x", fn, gate_id,
       host_id);
   if (host_id == DH_ID) {
     LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: Requested host shall not be DH ", fn);
+        << StringPrintf("%s; Requested host shall not be DH ", fn);
     return 0xFF;
   }
 
@@ -875,7 +836,7 @@ uint8_t NfcStExtensions::checkGateForHostId(uint8_t gate_id, uint8_t host_id) {
         ((mPipesInfo[DH_IDX].data[i].dest_host == host_id) ||
          (mPipesInfo[DH_IDX].data[i].source_host == host_id))) {
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: Found gate 0x%x between DH and host 0x%x - pipe_id = 0x%x", fn,
+          "%s; Found gate 0x%x between DH and host 0x%x - pipe_id = 0x%x", fn,
           gate_id, host_id, mPipesInfo[DH_IDX].data[i].pipe_id);
       return mPipesInfo[DH_IDX].data[i].pipe_id;
     }
@@ -893,20 +854,16 @@ uint8_t NfcStExtensions::checkGateForHostId(uint8_t gate_id, uint8_t host_id) {
  ** Returns:         None.
  **
  *******************************************************************************/
-/* NCI 2.0 - Begin */
 void NfcStExtensions::updateSwitchOffMode() {
   static const char fn[] = "NfcStExtensions::updateSwitchOffMode";
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: enter mCeOnSwitchOffState = %d", fn, mCeOnSwitchOffState);
+  LOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; mCeOnSwitchOffState = %d", fn, mCeOnSwitchOffState);
 
   setProprietaryConfigSettings(
       NFCC_CONFIGURATION, 0, 0,
       !mCeOnSwitchOffState);  // real byte number computed in there
-
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
 }
-/* NCI 2.0 - End */
 
 /*******************************************************************************
  **
@@ -932,7 +889,7 @@ NfcStExtensions& NfcStExtensions::getInstance() { return sStExtensions; }
  *******************************************************************************/
 int NfcStExtensions::prepareGate(uint8_t gate_id) {
   static const char fn[] = "NfcStExtensions::prepareGate";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
   int ret = 0;
   tJNI_ID_MGMT_INFO* gateInfo;
@@ -956,7 +913,7 @@ int NfcStExtensions::prepareGate(uint8_t gate_id) {
 
     if (nfaStat != NFA_STATUS_OK) {
       LOG(ERROR) << StringPrintf(
-          "%s: fail adding static pipe for Id mgmt gate; error=0x%X", fn,
+          "%s; fail adding static pipe for Id mgmt gate; error=0x%X", fn,
           nfaStat);
       return (ret);
     }
@@ -969,8 +926,8 @@ int NfcStExtensions::prepareGate(uint8_t gate_id) {
     // Get pipe info
     uint8_t pipe_id, pipe_state;
 
-    /* NCI 2.0 - Begin */ bool status = getPipesInfo();
-    /* NCI 2.0 - End */
+    bool status = getPipesInfo();
+
     if (status == false) {
       return ret;
     }
@@ -998,7 +955,7 @@ int NfcStExtensions::prepareGate(uint8_t gate_id) {
         break;
 
       default:
-        LOG(ERROR) << StringPrintf("%s: Unvalid pipe state returned: 0x%x", fn,
+        LOG(ERROR) << StringPrintf("%s; Unvalid pipe state returned: 0x%x", fn,
                                    pipe_state);
         return ret;
     }
@@ -1009,7 +966,7 @@ int NfcStExtensions::prepareGate(uint8_t gate_id) {
                                        gate_id)) == NFA_STATUS_OK) {
         mNfaHciCreatePipeEvent.wait();  // wait for NFA_HCI_CREATE_PIPE_EVT
       } else {
-        LOG(ERROR) << StringPrintf("%s: NFA_HciCreatePipe failed; error=0x%X",
+        LOG(ERROR) << StringPrintf("%s; NFA_HciCreatePipe failed; error=0x%X",
                                    fn, nfaStat);
         return ret;
       }
@@ -1022,14 +979,14 @@ int NfcStExtensions::prepareGate(uint8_t gate_id) {
           NFA_STATUS_OK) {
         mNfaHciOpenPipeEvent.wait();  // wait for NFA_HCI_CREATE_PIPE_EVT
       } else {
-        LOG(ERROR) << StringPrintf("%s: NFA_HciCreatePipe failed; error=0x%X",
+        LOG(ERROR) << StringPrintf("%s; NFA_HciCreatePipe failed; error=0x%X",
                                    fn, nfaStat);
         return ret;
       }
     }
   }
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", fn);
   return 1;
 }
 
@@ -1045,7 +1002,7 @@ int NfcStExtensions::prepareGate(uint8_t gate_id) {
  *******************************************************************************/
 int NfcStExtensions::prepareGateForTest(uint8_t gate_id, uint8_t host_id) {
   static const char fn[] = "NfcStExtensions::prepareGateForTest";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
   uint8_t pipe_state;
   bool isGateSetup = false;
@@ -1053,15 +1010,14 @@ int NfcStExtensions::prepareGateForTest(uint8_t gate_id, uint8_t host_id) {
   bool isPipeOpened = false;
 
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: Preparing gate 0x%x for test on host 0x%x", fn, gate_id, host_id);
+      "%s; Preparing gate 0x%x for test on host 0x%x", fn, gate_id, host_id);
 
   if (mNfaStExtHciHandle == NFA_HANDLE_INVALID) {
     return 0xFF;
   }
 
   // Check if gate is listed in info retrieved from device mgmt gate (pipe info)
-  /* NCI 2.0 - Begin */ bool status = getPipesInfo();
-  /* NCI 2.0 - End */
+  bool status = getPipesInfo();
 
   if (status == false) {
     return 0xFF;
@@ -1088,7 +1044,7 @@ int NfcStExtensions::prepareGateForTest(uint8_t gate_id, uint8_t host_id) {
         break;
 
       default:
-        LOG(ERROR) << StringPrintf("%s: Unvalid pipe state returned: 0x%x", fn,
+        LOG(ERROR) << StringPrintf("%s; Unvalid pipe state returned: 0x%x", fn,
                                    pipe_state);
         return 0xFF;
     }
@@ -1098,7 +1054,7 @@ int NfcStExtensions::prepareGateForTest(uint8_t gate_id, uint8_t host_id) {
     nfaStat = NFA_HciAllocGate(mNfaStExtHciHandle, gate_id);
     if (nfaStat != NFA_STATUS_OK) {
       LOG(ERROR) << StringPrintf(
-          "%s: fail adding static pipe for gate 0x%x; error=0x%X", fn, nfaStat,
+          "%s; fail adding static pipe for gate 0x%x; error=0x%X", fn, nfaStat,
           gate_id);
       return (0xFF);
     }
@@ -1110,7 +1066,7 @@ int NfcStExtensions::prepareGateForTest(uint8_t gate_id, uint8_t host_id) {
                                      gate_id)) == NFA_STATUS_OK) {
       mNfaHciCreatePipeEvent.wait();  // wait for NFA_HCI_CREATE_PIPE_EVT
     } else {
-      LOG(ERROR) << StringPrintf("%s: NFA_HciCreatePipe failed; error=0x%X", fn,
+      LOG(ERROR) << StringPrintf("%s; NFA_HciCreatePipe failed; error=0x%X", fn,
                                  nfaStat);
       return 0xFF;
     }
@@ -1123,7 +1079,7 @@ int NfcStExtensions::prepareGateForTest(uint8_t gate_id, uint8_t host_id) {
         NFA_STATUS_OK) {
       mHciRspRcvdEvent.wait();  // wait for NFA_HCI_CREATE_PIPE_EVT
     } else {
-      LOG(ERROR) << StringPrintf("%s: NFA_HciCreatePipe failed; error=0x%X", fn,
+      LOG(ERROR) << StringPrintf("%s; NFA_HciCreatePipe failed; error=0x%X", fn,
                                  nfaStat);
       mIsWaitingEvent.IsTestPipeOpened = false;
       return 0xFF;
@@ -1131,10 +1087,10 @@ int NfcStExtensions::prepareGateForTest(uint8_t gate_id, uint8_t host_id) {
     mIsWaitingEvent.IsTestPipeOpened = false;
   } else {
     LOG(ERROR) << StringPrintf(
-        "%s: Pipe already created and opened fpr gate 0x%x", fn, gate_id);
+        "%s; Pipe already created and opened fpr gate 0x%x", fn, gate_id);
   }
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", fn);
   return mCreatedPipeId;
 }
 
@@ -1151,12 +1107,12 @@ int NfcStExtensions::prepareGateForTest(uint8_t gate_id, uint8_t host_id) {
  *******************************************************************************/
 int NfcStExtensions::handleLoopback() {
   static const char fn[] = "NfcStExtensions::handleLoopback";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
   int ret = 0, i;
   uint8_t txData[SIZE_LOOPBACK_DATA], rxData[SIZE_LOOPBACK_DATA];
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
 
   ret = prepareGate(LOOPBACK_GATE_ID);
   if (ret == 0) {
@@ -1175,7 +1131,7 @@ int NfcStExtensions::handleLoopback() {
   if (nfaStat == NFA_STATUS_OK) {
     mNfaHciEventRcvdEvent.wait();  // wait for NFA_HCI_CREATE_PIPE_EVT
   } else {
-    LOG(ERROR) << StringPrintf("%s: NFA_HciSendEvent failed; error=0x%X", fn,
+    LOG(ERROR) << StringPrintf("%s; NFA_HciSendEvent failed; error=0x%X", fn,
                                nfaStat);
     return ret;
   }
@@ -1183,7 +1139,7 @@ int NfcStExtensions::handleLoopback() {
   // Check received data
   if (mRspSize != SIZE_LOOPBACK_DATA) {
     LOG(ERROR) << StringPrintf(
-        "%s: Returned length for loopback is wrong: expected %d, received %d",
+        "%s; Returned length for loopback is wrong: expected %d, received %d",
         fn, SIZE_LOOPBACK_DATA, mRspSize);
     return 0;
   }
@@ -1191,13 +1147,13 @@ int NfcStExtensions::handleLoopback() {
   for (i = 0; i < SIZE_LOOPBACK_DATA; i++) {
     if (rxData[i] != txData[i]) {
       LOG(ERROR) << StringPrintf(
-          "%s: Error in received data: rxData[%d] = 0x%x, txData[%d] = 0x%x",
+          "%s; Error in received data: rxData[%d] = 0x%x, txData[%d] = 0x%x",
           fn, i, rxData[i], i, txData[i]);
       return 0;
     }
   }
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", fn);
   return 1;
 }
 
@@ -1216,12 +1172,11 @@ int NfcStExtensions::handleLoopback() {
 void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
                                      tNFA_HCI_EVT_DATA* eventData) {
   static const char fn[] = "NfcStExtensions::nfaHciCallback";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: event=0x%X", fn, event);
 
   switch (event) {
     case NFA_HCI_REGISTER_EVT: {
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: NFA_HCI_REGISTER_EVT; status=0x%X; handle=0x%X", fn,
+          "%s; NFA_HCI_REGISTER_EVT; status=0x%X; handle=0x%X", fn,
           eventData->hci_register.status, eventData->hci_register.hci_handle);
       SyncEventGuard guard(sStExtensions.mNfaHciRegisterEvent);
 
@@ -1231,7 +1186,7 @@ void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
 
     case NFA_HCI_CREATE_PIPE_EVT: {
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: NFA_HCI_CREATE_PIPE_EVT; status=0x%X; pipe=0x%X; src gate=0x%X; "
+          "%s; NFA_HCI_CREATE_PIPE_EVT; status=0x%X; pipe=0x%X; src gate=0x%X; "
           "dest host=0x%X; dest gate=0x%X",
           fn, eventData->created.status, eventData->created.pipe,
           eventData->created.source_gate, eventData->created.dest_host,
@@ -1259,7 +1214,7 @@ void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
 
     case NFA_HCI_OPEN_PIPE_EVT: {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: NFA_HCI_OPEN_PIPE_EVT; status=0x%X; pipe=0x%X",
+          << StringPrintf("%s; NFA_HCI_OPEN_PIPE_EVT; status=0x%X; pipe=0x%X",
                           fn, eventData->opened.status, eventData->opened.pipe);
 
       if (eventData->opened.pipe == sStExtensions.mIdMgmtInfo.pipe_id) {
@@ -1275,7 +1230,7 @@ void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
       int i;
 
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: NFA_HCI_GET_REG_RSP_EVT; status: 0x%X; pipe: 0x%X, reg_idx: "
+          "%s; NFA_HCI_GET_REG_RSP_EVT; status: 0x%X; pipe: 0x%X, reg_idx: "
           "0x%X, len: %d",
           fn, eventData->registry.status, eventData->registry.pipe,
           eventData->registry.index, eventData->registry.data_len);
@@ -1302,7 +1257,7 @@ void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
 
     case NFA_HCI_SET_REG_RSP_EVT: {
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: NFA_HCI_SET_REG_RSP_EVT; status: 0x%X; pipe: 0x%X, reg_idx: "
+          "%s; NFA_HCI_SET_REG_RSP_EVT; status: 0x%X; pipe: 0x%X, reg_idx: "
           "0x%X, len: %d",
           fn, eventData->registry.status, eventData->registry.pipe,
           eventData->registry.index, eventData->registry.data_len);
@@ -1312,7 +1267,7 @@ void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
       int i;
       tNFA_HCI_RSP_RCVD& rsp_rcvd = eventData->rsp_rcvd;
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: NFA_HCI_RSP_RCVD_EVT; status: 0x%X; code: 0x%X; pipe: 0x%X; "
+          "%s; NFA_HCI_RSP_RCVD_EVT; status: 0x%X; code: 0x%X; pipe: 0x%X; "
           "len: %u",
           fn, rsp_rcvd.status, rsp_rcvd.rsp_code, rsp_rcvd.pipe,
           rsp_rcvd.rsp_len);
@@ -1324,14 +1279,14 @@ void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
 
             for (i = 0; i < rsp_rcvd.rsp_len; i++) {
               LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-                  "%s: NFA_HCI_RSP_RCVD_EVT; sp_rcvd.rsp_data[%d] = 0x%x", fn,
+                  "%s; NFA_HCI_RSP_RCVD_EVT; sp_rcvd.rsp_data[%d] = 0x%x", fn,
                   i, rsp_rcvd.rsp_data[i]);
 
               sStExtensions.mRxHciData[i] = rsp_rcvd.rsp_data[i];
             }
           } else if (sStExtensions.mIsWaitingEvent.IsTestPipeOpened == true) {
             LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-                "%s: NFA_HCI_RSP_RCVD_EVT; pipe 0x%x is now opened!!", fn,
+                "%s; NFA_HCI_RSP_RCVD_EVT; pipe 0x%x is now opened!!", fn,
                 rsp_rcvd.pipe);
           }
         }
@@ -1344,11 +1299,11 @@ void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
     case NFA_HCI_CMD_SENT_EVT: {
       tNFA_HCI_CMD_SENT& cmd_sent = eventData->cmd_sent;
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: NFA_HCI_CMD_SENT_EVT; status=0x%X;", fn, cmd_sent.status);
+          "%s; NFA_HCI_CMD_SENT_EVT; status=0x%X;", fn, cmd_sent.status);
 
       if (cmd_sent.status == NFA_STATUS_FAILED) {
         LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-            "%s: NFA_HCI_CMD_SENT_EVT; Status Failed!!! - Aborting all waits",
+            "%s; NFA_HCI_CMD_SENT_EVT; Status Failed!!! - Aborting all waits",
             fn);
         // Abort all waits
         sStExtensions.abortWaits();
@@ -1357,12 +1312,12 @@ void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
 
     case NFA_HCI_EVENT_SENT_EVT:
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: NFA_HCI_EVENT_SENT_EVT; status=0x%X", fn,
+          << StringPrintf("%s; NFA_HCI_EVENT_SENT_EVT; status=0x%X", fn,
                           eventData->evt_sent.status);
       {
         if (eventData->evt_sent.status == NFA_STATUS_FAILED) {
           LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-              "%s: NFA_HCI_CMD_SENT_EVT; Status Failed!!! - Aborting all waits",
+              "%s; NFA_HCI_CMD_SENT_EVT; Status Failed!!! - Aborting all waits",
               fn);
           // Abort all waits
           sStExtensions.abortWaits();
@@ -1372,13 +1327,13 @@ void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
 
     case NFA_HCI_EVENT_RCVD_EVT: {
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: NFA_HCI_EVENT_RCVD_EVT; code: 0x%X; pipe: 0x%X; data len: %u",
+          "%s; NFA_HCI_EVENT_RCVD_EVT; code: 0x%X; pipe: 0x%X; data len: %u",
           fn, eventData->rcvd_evt.evt_code, eventData->rcvd_evt.pipe,
           eventData->rcvd_evt.evt_len);
 
       if (eventData->rcvd_evt.evt_code == NFA_HCI_EVT_POST_DATA) {
         LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-            "%s: NFA_HCI_EVENT_RCVD_EVT; NFA_HCI_EVT_POST_DATA", fn);
+            "%s; NFA_HCI_EVENT_RCVD_EVT; NFA_HCI_EVT_POST_DATA", fn);
         sStExtensions.mRspSize = eventData->rcvd_evt.evt_len;
         SyncEventGuard guard(sStExtensions.mNfaHciEventRcvdEvent);
         sStExtensions.mNfaHciEventRcvdEvent.notifyOne();
@@ -1387,13 +1342,13 @@ void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
 
     case NFA_HCI_ALLOCATE_GATE_EVT:
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: NFA_HCI_ALLOCATE_GATE_EVT; status = %d, gate = 0x%x", fn,
+          "%s; NFA_HCI_ALLOCATE_GATE_EVT; status = %d, gate = 0x%x", fn,
           eventData->allocated.status, eventData->allocated.gate);
       break;
 
     case NFA_HCI_CLOSE_PIPE_EVT: {
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: NFA_HCI_CLOSE_PIPE_EVT; status = %d, pipe = 0x%x", fn,
+          "%s; NFA_HCI_CLOSE_PIPE_EVT; status = %d, pipe = 0x%x", fn,
           eventData->closed.status, eventData->closed.pipe);
       SyncEventGuard guard(sStExtensions.mNfaHciClosePipeEvent);
       sStExtensions.mNfaHciClosePipeEvent.notifyOne();
@@ -1401,7 +1356,7 @@ void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
 
     default:
       LOG(ERROR) << StringPrintf(
-          "%s: event code=0x%X not handled by this method", fn, event);
+          "%s; event code=0x%X not handled by this method", fn, event);
       break;
   }
 }
@@ -1417,7 +1372,6 @@ void NfcStExtensions::nfaHciCallback(tNFA_HCI_EVT event,
  ** Returns:         Handle of secure element.  values < 0 represent failure.
  **
  *******************************************************************************/
-/* NCI 2.0 - Begin */
 void NfcStExtensions::setCoreResetNtfInfo(uint8_t* ptr_manu_info) {
   static const char fn[] = "NfcStExtensions::setCoreResetNtfInfo";
 
@@ -1427,10 +1381,9 @@ void NfcStExtensions::setCoreResetNtfInfo(uint8_t* ptr_manu_info) {
   memcpy(mCustomerData, &ptr_manu_info[17], sizeof(mCustomerData));
 
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s - FW Info = %08X, HW Info = %04X, CustData=%02X%02X",
+      << StringPrintf("%s; FW Info = %08X, HW Info = %04X, CustData=%02X%02X",
                       fn, mFwInfo, mHwInfo, mCustomerData[6], mCustomerData[7]);
 }
-/* NCI 2.0 - End */
 
 /*******************************************************************************
  **
@@ -1445,8 +1398,6 @@ void NfcStExtensions::setCoreResetNtfInfo(uint8_t* ptr_manu_info) {
  *******************************************************************************/
 int NfcStExtensions::getFirmwareVersion(uint8_t* fwVersion) {
   static const char fn[] = "NfcStExtensions::getFirmwareVersion";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
-  /* NCI 2.0 - Begin */
   int ret = 1;
 
   fwVersion[0] = mFwInfo >> 24;
@@ -1454,15 +1405,11 @@ int NfcStExtensions::getFirmwareVersion(uint8_t* fwVersion) {
   fwVersion[2] = mFwInfo >> 8;
   fwVersion[3] = mFwInfo;
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: FW Version = %02X.%02X.%02X%02X", fn, fwVersion[0],
+      << StringPrintf("%s; FW Version = %02X.%02X.%02X%02X", fn, fwVersion[0],
                       fwVersion[1], fwVersion[2], fwVersion[3]);
-  /* NCI 2.0 - End */
-
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
   return ret;
 }
 
-/* NCI 2.0 - Begin */
 /*******************************************************************************
  **
  ** Function:        getCustomerData
@@ -1476,7 +1423,7 @@ int NfcStExtensions::getFirmwareVersion(uint8_t* fwVersion) {
  *******************************************************************************/
 int NfcStExtensions::getCustomerData(uint8_t* customerData) {
   static const char fn[] = "NfcStExtensions::getCustomerData";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
 
   int ret = 1;
 
@@ -1484,7 +1431,6 @@ int NfcStExtensions::getCustomerData(uint8_t* customerData) {
 
   return ret;
 }
-/* NCI 2.0 - End */
 
 /*******************************************************************************
  **
@@ -1499,17 +1445,14 @@ int NfcStExtensions::getCustomerData(uint8_t* customerData) {
  *******************************************************************************/
 int NfcStExtensions::getHWVersion(uint8_t* hwVersion) {
   static const char fn[] = "NfcStExtensions::getHWVersion";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
   int ret = 1;
 
   hwVersion[0] = mHwInfo >> 8;
   hwVersion[1] = mHwInfo;
 
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: HW Version = %02X%02X ", fn, hwVersion[0], hwVersion[1]);
-  /* NCI 2.0 - End */
+      "%s; HW Version = %02X%02X ", fn, hwVersion[0], hwVersion[1]);
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
   return ret;
 }
 
@@ -1527,9 +1470,8 @@ int NfcStExtensions::getHWVersion(uint8_t* hwVersion) {
 int NfcStExtensions::getCRCConfiguration(uint8_t* crcConfig) {
   int ret = 0;
   static const char fn[] = "NfcStExtensions::getCRCConfiguration";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
-
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
+  LOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; enter (nothing done)", fn);
 
   return ret;
 }
@@ -1547,17 +1489,14 @@ int NfcStExtensions::getCRCConfiguration(uint8_t* crcConfig) {
  *******************************************************************************/
 bool NfcStExtensions::isSEConnected(int se_id) {
   static const char fn[] = "NfcStExtensions::isSEConnected";
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: enter, requesting info for SE id 0x%x", fn, se_id);
   bool result = false;
 
   StSecureElement::getInstance().getHostList();
   result = StSecureElement::getInstance().isSEConnected(se_id);
 
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: SE id 0x%x connected is %d", fn, se_id, result);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+      "%s; requesting info for SE id 0x%x, connected is %d", fn, se_id, result);
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
   return result;
 }
 
@@ -1574,7 +1513,6 @@ bool NfcStExtensions::isSEConnected(int se_id) {
  *******************************************************************************/
 void NfcStExtensions::getFwInfo() {
   static const char fn[] = "NfcStExtensions::getFwInfo";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
   uint8_t hw_version[HW_VERSION_SIZE];
   uint8_t bitmap = 0x0;
 
@@ -1587,21 +1525,15 @@ void NfcStExtensions::getFwInfo() {
   }
 
   if (bitmap & 0x1) {
-    /* NCI 2.0 - Begin */
     LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s: FW version is %02x.%02x.%02x%02X", fn, mFwVersion[0],
+        "%s; FW version is %02x.%02x.%02x%02X", fn, mFwVersion[0],
         mFwVersion[1], mFwVersion[2], mFwVersion[3]);
-    /* NCI 2.0 - End */
   }
 
   if (bitmap & 0x2) {
-    /* NCI 2.0 - Begin */
     LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s: HW version is %02x%02x", fn, hw_version[0], hw_version[1]);
-    /* NCI 2.0 - End */
+        "%s; HW version is %02x%02x", fn, hw_version[0], hw_version[1]);
   }
-
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
 }
 
 /*******************************************************************************
@@ -1617,7 +1549,7 @@ void NfcStExtensions::setNfcSystemProp(const char* key_id,
                                        const char* key_value) {
   static const char fn[] = "NfcStExtensions::setNfcSystemProp";
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: enter - key_id = %s, key_value = %s", fn, key_id, key_value);
+      "%s; enter - key_id = %s, key_value = %s", fn, key_id, key_value);
 
   property_set(key_id, key_value);
 }
@@ -1633,18 +1565,8 @@ void NfcStExtensions::setNfcSystemProp(const char* key_id,
  *******************************************************************************/
 int NfcStExtensions::getHceUserProp() {
   static const char fn[] = "NfcStExtensions::getHceUserProp";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
 
-  // uint32_t value = getNfcSystemProp("nfc.st.hce_capable");
-  // if (value != DUMMY_SYTEM_PROP_VALUE) {
-  //  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-  //          "%s: User selected HCE status is 0x%X", fn, value);
-  //} else {
-  //  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-  //          "%s: User did not set the HCE yet", fn);
-  //}
-
-  // return value;
   return DUMMY_SYTEM_PROP_VALUE;
 }
 
@@ -1660,7 +1582,6 @@ int NfcStExtensions::getHceUserProp() {
 uint32_t NfcStExtensions::getNfcSystemProp(const char* key_id) {
   char valueStr[PROPERTY_VALUE_MAX] = {0};
   static const char fn[] = "NfcStExtensions::getNfcSystemProp";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
   unsigned long num = DUMMY_SYTEM_PROP_VALUE;  // prop not set
 
   int len = property_get(key_id, valueStr, "");
@@ -1670,7 +1591,7 @@ uint32_t NfcStExtensions::getNfcSystemProp(const char* key_id) {
   }
 
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s - Read property %s - len = %d - value = %lu", fn, key_id, len, num);
+      "%s; Read property %s - len = %d - value = %lu", fn, key_id, len, num);
 
   return num;
 }
@@ -1678,7 +1599,7 @@ uint32_t NfcStExtensions::getNfcSystemProp(const char* key_id) {
 void NfcStExtensions::setReaderMode(bool enabled) {
   static const char fn[] = "NfcStExtensions::setReaderMode";
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: enabled = %d", fn, enabled);
+      << StringPrintf("%s; enabled = %d", fn, enabled);
 
   mIsReaderMode = enabled;
 }
@@ -1695,23 +1616,23 @@ void NfcStExtensions::setReaderMode(bool enabled) {
 void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
   static const char fn[] = "NfcStExtensions::setRfCOnfiguration";
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: enter - mIsReaderMode = %d", fn, mIsReaderMode);
+      << StringPrintf("%s; enter - mIsReaderMode = %d", fn, mIsReaderMode);
 
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
   bool mustRestartDiscovery = false;
 
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: modeBitmap = 0x%x", fn, modeBitmap);
+      << StringPrintf("%s; modeBitmap = 0x%x", fn, modeBitmap);
   for (int i = 0; i < RF_CONFIG_ARRAY_SIZE; i++) {
     LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: techArray[%d] = 0x%x", fn, i, techArray[i]);
+        << StringPrintf("%s; techArray[%d] = 0x%x", fn, i, techArray[i]);
   }
 
   if (mIsReaderMode == false) {
     gIsReconfiguringDiscovery.start();
     if (android::isDiscoveryStarted()) {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: Stopping RF discovery", fn);
+          << StringPrintf("%s; Stopping RF discovery", fn);
       // Stop RF discovery
       android::startRfDiscovery(false);
       mustRestartDiscovery = true;
@@ -1731,7 +1652,7 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
           ((mRfConfig.techArray[P2P_POLL_IDX]) &&
            (mRfConfig.modeBitmap & (0x1 << P2P_LISTEN_IDX)))) {
         LOG_IF(INFO, nfc_debug_enabled)
-            << StringPrintf("%s: Cleaning polling tech", fn);
+            << StringPrintf("%s; Cleaning polling tech", fn);
         SyncEventGuard guard(mNfaDmEventPollDisabled);
         nfaStat = NFA_DisablePolling();
         if (nfaStat == NFA_STATUS_OK) {
@@ -1739,7 +1660,7 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
           android::pollingChanged(0, -1, 0);
         } else {
           LOG(ERROR) << StringPrintf(
-              "%s: Failed to disable polling; error=0x%X", __func__, nfaStat);
+              "%s; Failed to disable polling; error=0x%X", __func__, nfaStat);
         }
       }
     }
@@ -1749,7 +1670,7 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
       if ((mRfConfig.techArray[P2P_LISTEN_IDX]) &&
           (mRfConfig.modeBitmap & (0x1 << P2P_LISTEN_IDX))) {
         LOG_IF(INFO, nfc_debug_enabled)
-            << StringPrintf("%s: Cleaning p2p listen tech", fn);
+            << StringPrintf("%s; Cleaning p2p listen tech", fn);
       }
 
       PeerToPeer::getInstance().enableP2pListening(false);
@@ -1762,21 +1683,21 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
           (mRfConfig.modeBitmap & (0x1 << CE_IDX))) {
         {
           LOG_IF(INFO, nfc_debug_enabled)
-              << StringPrintf("%s: Cleaning listen tech", fn);
+              << StringPrintf("%s; Cleaning listen tech", fn);
           SyncEventGuard guard(mNfaDmEventListenDisabled);
           if ((nfaStat = NFA_DisableListening()) == NFA_STATUS_OK) {
             mNfaDmEventListenDisabled
                 .wait();  // wait for NFA_LISTEN_DISABLED_EVT
           } else {
             LOG(ERROR) << StringPrintf(
-                "%s: NFA_DisableListening() failed; error=0x%X", fn, nfaStat);
+                "%s; NFA_DisableListening() failed; error=0x%X", fn, nfaStat);
             gIsReconfiguringDiscovery.end();
             return;
           }
         }
 
         LOG_IF(INFO, nfc_debug_enabled)
-            << StringPrintf("%s: De-register CE on DH tech", fn);
+            << StringPrintf("%s; De-register CE on DH tech", fn);
         {
           SyncEventGuard guard(mNfaDmEventCeDeregistered);
           if ((nfaStat = NFA_CeDeregisterAidOnDH(NFA_HANDLE_GROUP_CE | 0x1)) ==
@@ -1785,7 +1706,7 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
                 .wait();  // wait for NFA_CE_DEREGISTERED_EVT
           } else {
             LOG(ERROR) << StringPrintf(
-                "%s: NFA_CeDeregisterAidOnDH() failed; error=0x%X", fn,
+                "%s; NFA_CeDeregisterAidOnDH() failed; error=0x%X", fn,
                 nfaStat);
             gIsReconfiguringDiscovery.end();
             return;
@@ -1798,9 +1719,7 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
 
   // Record Rf Config
   mRfConfig.modeBitmap = modeBitmap;
-  /* NCI 2.0 - Begin */
   memcpy(mRfConfig.techArray, techArray, sizeof(mRfConfig.techArray));
-  /* NCI 2.0 - End */
 
   if (mIsReaderMode) {
     return;
@@ -1836,9 +1755,8 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
   if ((modeBitmap & (0x1 << READER_IDX)) ||
       (modeBitmap & (0x1 << P2P_LISTEN_IDX))) {
     LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: Reprogram polling", fn);
+        << StringPrintf("%s; Reprogram polling", fn);
 
-    /* NCI 2.0 - Begin */
     uint8_t techMask = 0;
 
     if (modeBitmap & (0x1 << READER_IDX)) {
@@ -1847,14 +1765,13 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
     if (modeBitmap & (0x1 << P2P_LISTEN_IDX)) {
       techMask |= techArray[P2P_POLL_IDX];
     }
-    /* NCI 2.0 - End */
 
     SyncEventGuard guard(mNfaDmEventPollEnabled);
     if ((nfaStat = NFA_EnablePolling(techMask)) == NFA_STATUS_OK) {
       mNfaDmEventPollEnabled.wait();  // wait for NFA_POLL_ENABLED_EVT
       android::pollingChanged(0, 1, 0);
     } else {
-      LOG(ERROR) << StringPrintf("%s: NFA_EnablePolling() failed; error=0x%X",
+      LOG(ERROR) << StringPrintf("%s; NFA_EnablePolling() failed; error=0x%X",
                                  fn, nfaStat);
       gIsReconfiguringDiscovery.end();
       return;
@@ -1864,13 +1781,13 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
   // program listen
   if (modeBitmap & (0x1 << CE_IDX)) {
     LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: Reprogram listen mode", fn);
+        << StringPrintf("%s; Reprogram listen mode", fn);
     {
       if (techArray[CE_IDX] != 0) {
         if ((nfaStat = NFA_CeSetIsoDepListenTech(techArray[CE_IDX])) !=
             NFA_STATUS_OK) {  // nothing ot wait here
           LOG(ERROR) << StringPrintf(
-              "%s: NFA_CeSetIsoDepListenTech() failed; error=0x%X", fn,
+              "%s; NFA_CeSetIsoDepListenTech() failed; error=0x%X", fn,
               nfaStat);
           gIsReconfiguringDiscovery.end();
           return;
@@ -1878,7 +1795,7 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
 
         // Re- register CE on DH
         LOG_IF(INFO, nfc_debug_enabled)
-            << StringPrintf("%s: Re-register CE on DH", fn);
+            << StringPrintf("%s; Re-register CE on DH", fn);
         {
           // Register
           SyncEventGuard guard(mNfaDmEventCeRegistered);
@@ -1888,28 +1805,28 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
             mNfaDmEventCeRegistered.wait();  // wait for NFA_CE_REGISTERED_EVT
           } else {
             LOG(ERROR) << StringPrintf(
-                "%s: NFA_CeRegisterAidOnDH() failed; error=0x%X", fn, nfaStat);
+                "%s; NFA_CeRegisterAidOnDH() failed; error=0x%X", fn, nfaStat);
             gIsReconfiguringDiscovery.end();
             return;
           }
         }
 
         LOG_IF(INFO, nfc_debug_enabled)
-            << StringPrintf("%s: Re-enable listen mode", fn);
+            << StringPrintf("%s; Re-enable listen mode", fn);
         {
           SyncEventGuard guard(mNfaDmEventListenEnabled);
           if ((nfaStat = NFA_EnableListening()) == NFA_STATUS_OK) {
             mNfaDmEventListenEnabled.wait();  // wait for NFA_LISTEN_ENABLED_EVT
           } else {
             LOG(ERROR) << StringPrintf(
-                "%s: NFA_EnableListening() failed; error=0x%X", fn, nfaStat);
+                "%s; NFA_EnableListening() failed; error=0x%X", fn, nfaStat);
             gIsReconfiguringDiscovery.end();
             return;
           }
         }
       } else {
         LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-            "%s: No listen mode techno to program/re-enable", fn);
+            "%s; No listen mode techno to program/re-enable", fn);
       }
     }
   }
@@ -1917,30 +1834,30 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
   if (modeBitmap & (0x1 << P2P_LISTEN_IDX)) {  // program p2p listen
     {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: Reprogram p2p listen", fn);
+          << StringPrintf("%s; Reprogram p2p listen", fn);
       PeerToPeer::getInstance().setP2pListenMask(techArray[P2P_LISTEN_IDX]);
       PeerToPeer::getInstance().enableP2pListening(true);
     }
     LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: Re-enable listen mode", fn);
+        << StringPrintf("%s; Re-enable listen mode", fn);
     {
       SyncEventGuard guard(mNfaDmEventListenEnabled);
       if ((nfaStat = NFA_EnableListening()) == NFA_STATUS_OK) {
         mNfaDmEventListenEnabled.wait();  // wait for NFA_LISTEN_ENABLED_EVT
       } else {
         LOG(ERROR) << StringPrintf(
-            "%s: NFA_EnableListening() failed; error=0x%X", fn, nfaStat);
+            "%s; NFA_EnableListening() failed; error=0x%X", fn, nfaStat);
         gIsReconfiguringDiscovery.end();
         return;
       }
     }
     {
-      LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Re-enable p2p", fn);
+      LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; Re-enable p2p", fn);
       SyncEventGuard guard(mNfaDmEventP2pResumed);
       if ((nfaStat = NFA_ResumeP2p()) == NFA_STATUS_OK) {
         mNfaDmEventP2pResumed.wait();  // wait for NFA_P2P_RESUMED_EVT
       } else {
-        LOG(ERROR) << StringPrintf("%s: NFA_ResumeP2p() failed; error=0x%X", fn,
+        LOG(ERROR) << StringPrintf("%s; NFA_ResumeP2p() failed; error=0x%X", fn,
                                    nfaStat);
         gIsReconfiguringDiscovery.end();
         return;
@@ -1954,7 +1871,7 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
     if ((nfaStat = NFA_PauseP2p()) == NFA_STATUS_OK) {
       mNfaDmEventP2pPaused.wait();  // wait for NFA_P2P_PAUSED_EVT
     } else {
-      LOG(ERROR) << StringPrintf("%s: NFA_ResumeP2p() failed; error=0x%X", fn,
+      LOG(ERROR) << StringPrintf("%s; NFA_ResumeP2p() failed; error=0x%X", fn,
                                  nfaStat);
       gIsReconfiguringDiscovery.end();
       return;
@@ -1971,14 +1888,14 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
 
   if (mustRestartDiscovery) {
     LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: Restarting RF discovery", fn);
+        << StringPrintf("%s; Restarting RF discovery", fn);
     // Stop RF discovery
     android::startRfDiscovery(true);
     android::pollingChanged(1, 0, 0);
   }
   gIsReconfiguringDiscovery.end();
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", fn);
 }
 
 /*******************************************************************************
@@ -1994,26 +1911,36 @@ void NfcStExtensions::setRfConfiguration(int modeBitmap, uint8_t* techArray) {
  *******************************************************************************/
 int NfcStExtensions::getRfConfiguration(uint8_t* techArray) {
   static const char fn[] = "NfcStExtensions::getRfConfiguration";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
   int i;
 
   memcpy(techArray, mRfConfig.techArray, sizeof(mRfConfig.techArray));
 
   for (i = 0; i < RF_CONFIG_ARRAY_SIZE; i++) {
     LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s: mRfConfig.techArray[%d] = 0x%x", fn, i, mRfConfig.techArray[i]);
+        "%s; mRfConfig.techArray[%d] = 0x%x", fn, i, mRfConfig.techArray[i]);
   }
 
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: mRfConfig.modeBitmap = 0x%x", fn, mRfConfig.modeBitmap);
+      "%s; mRfConfig.modeBitmap = 0x%x", fn, mRfConfig.modeBitmap);
 
   return mRfConfig.modeBitmap;
 }
 
+/*******************************************************************************
+ **
+ ** Function:        setRfBitmap
+ **
+ ** Description:     Receive connection-related events from stack.
+ **                  connEvent: Event code.
+ **                  eventData: Event data.
+ **
+ ** Returns:         None
+ **
+ *******************************************************************************/
 void NfcStExtensions::setRfBitmap(int modeBitmap) {
   static const char fn[] = "NfcStExtensions::setRfBitmap()";
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: enter - modeBitmap: %02X", fn, modeBitmap);
+      << StringPrintf("%s; enter - modeBitmap: %02X", fn, modeBitmap);
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
 
   // Clean techno
@@ -2026,19 +1953,19 @@ void NfcStExtensions::setRfBitmap(int modeBitmap) {
     if (((modeBitmap & (0x1 << READER_IDX)) == 0) ||
         ((modeBitmap & (0x1 << P2P_POLL_IDX)) == 0)) {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: Cleaning polling tech", fn);
+          << StringPrintf("%s; Cleaning polling tech", fn);
       SyncEventGuard guard(mNfaDmEventPollDisabled);
       nfaStat = NFA_DisablePolling();
       if (nfaStat == NFA_STATUS_OK) {
         mNfaDmEventPollDisabled.wait();  // wait for NFA_POLL_DISABLED_EVT
         android::pollingChanged(0, -1, 0);
       } else {
-        LOG(ERROR) << StringPrintf("%s: Failed to disable polling; error=0x%X",
+        LOG(ERROR) << StringPrintf("%s; Failed to disable polling; error=0x%X",
                                    __func__, nfaStat);
       }
     } else {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: Not cleaning polling tech", fn);
+          << StringPrintf("%s; Not cleaning polling tech", fn);
     }
   }
 
@@ -2046,12 +1973,12 @@ void NfcStExtensions::setRfBitmap(int modeBitmap) {
   {
     if ((modeBitmap & (0x1 << P2P_LISTEN_IDX)) == 0) {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: Cleaning p2p listen tech", fn);
+          << StringPrintf("%s; Cleaning p2p listen tech", fn);
       PeerToPeer::getInstance().enableP2pListening(false);
       android::pollingChanged(0, 0, -1);
     } else {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: Not cleaning p2p listen tech", fn);
+          << StringPrintf("%s; Not cleaning p2p listen tech", fn);
     }
   }
 
@@ -2060,31 +1987,31 @@ void NfcStExtensions::setRfBitmap(int modeBitmap) {
     if ((modeBitmap & (0x1 << CE_IDX)) == 0) {
       {
         LOG_IF(INFO, nfc_debug_enabled)
-            << StringPrintf("%s: Cleaning listen tech", fn);
+            << StringPrintf("%s; Cleaning listen tech", fn);
         SyncEventGuard guard(mNfaDmEventListenDisabled);
         if ((nfaStat = NFA_DisableListening()) == NFA_STATUS_OK) {
           mNfaDmEventListenDisabled.wait();  // wait for NFA_LISTEN_DISABLED_EVT
         } else {
           LOG(ERROR) << StringPrintf(
-              "%s: NFA_DisableListening() failed; error=0x%X", fn, nfaStat);
+              "%s; NFA_DisableListening() failed; error=0x%X", fn, nfaStat);
         }
       }
 
       {  // deregister CEonDH
         LOG_IF(INFO, nfc_debug_enabled)
-            << StringPrintf("%s: De-register CE on DH tech", fn);
+            << StringPrintf("%s; De-register CE on DH tech", fn);
         SyncEventGuard guard(mNfaDmEventCeDeregistered);
         if ((nfaStat = NFA_CeDeregisterAidOnDH(NFA_HANDLE_GROUP_CE | 0x1)) ==
             NFA_STATUS_OK) {
           mNfaDmEventCeDeregistered.wait();  // wait for NFA_CE_DEREGISTERED_EVT
         } else {
           LOG(ERROR) << StringPrintf(
-              "%s: NFA_CeDeregisterAidOnDH() failed; error=0x%X", fn, nfaStat);
+              "%s; NFA_CeDeregisterAidOnDH() failed; error=0x%X", fn, nfaStat);
         }
       }
     } else {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: Not cleaning listen tech", fn);
+          << StringPrintf("%s; Not cleaning listen tech", fn);
     }
   }
 
@@ -2112,8 +2039,6 @@ void NfcStExtensions::nfaConnectionCallback(uint8_t connEvent,
                                             tNFA_CONN_EVT_DATA* eventData) {
   static const char fn[] = "NfcStExtensions::nfaConnectionCallback";
 
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: event= %u", fn, connEvent);
   {
     SyncEventGuard guard(sStExtensions.mNfaDmEvent);
     if (sStExtensions.mWaitingForDmEvent == false) {
@@ -2124,49 +2049,49 @@ void NfcStExtensions::nfaConnectionCallback(uint8_t connEvent,
   switch (connEvent) {
     case NFA_POLL_ENABLED_EVT: {  // whether polling successfully started
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: NFA_POLL_ENABLED_EVT: status = %u", fn, eventData->status);
+          "%s; NFA_POLL_ENABLED_EVT: status = %u", fn, eventData->status);
       SyncEventGuard guard(sStExtensions.mNfaDmEventPollEnabled);
       sStExtensions.mNfaDmEventPollEnabled.notifyOne();
     } break;
 
     case NFA_POLL_DISABLED_EVT: {  // Listening/Polling stopped
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: NFA_POLL_DISABLED_EVT: status = %u", fn, eventData->status);
+          "%s; NFA_POLL_DISABLED_EVT: status = %u", fn, eventData->status);
       SyncEventGuard guard(sStExtensions.mNfaDmEventPollDisabled);
       sStExtensions.mNfaDmEventPollDisabled.notifyOne();
     } break;
 
     case NFA_SET_P2P_LISTEN_TECH_EVT: {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: NFA_SET_P2P_LISTEN_TECH_EVT", fn);
+          << StringPrintf("%s; NFA_SET_P2P_LISTEN_TECH_EVT", fn);
       SyncEventGuard guard(sStExtensions.mNfaDmEventP2pListen);
       sStExtensions.mNfaDmEventP2pListen.notifyOne();
     } break;
 
     case NFA_LISTEN_DISABLED_EVT: {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: NFA_LISTEN_DISABLED_EVT", fn);
+          << StringPrintf("%s; NFA_LISTEN_DISABLED_EVT", fn);
       SyncEventGuard guard(sStExtensions.mNfaDmEventListenDisabled);
       sStExtensions.mNfaDmEventListenDisabled.notifyOne();
     } break;
 
     case NFA_LISTEN_ENABLED_EVT: {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: NFA_LISTEN_ENABLED_EVT", __func__);
+          << StringPrintf("%s; NFA_LISTEN_ENABLED_EVT", __func__);
       SyncEventGuard guard(sStExtensions.mNfaDmEventListenEnabled);
       sStExtensions.mNfaDmEventListenEnabled.notifyOne();
     } break;
 
     case NFA_P2P_PAUSED_EVT: {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: NFA_P2P_PAUSED_EVT", fn);
+          << StringPrintf("%s; NFA_P2P_PAUSED_EVT", fn);
       SyncEventGuard guard(sStExtensions.mNfaDmEventP2pPaused);
       sStExtensions.mNfaDmEventP2pPaused.notifyOne();
     } break;
 
     case NFA_P2P_RESUMED_EVT: {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: NFA_P2P_RESUMED_EVT", fn);
+          << StringPrintf("%s; NFA_P2P_RESUMED_EVT", fn);
       SyncEventGuard guard(sStExtensions.mNfaDmEventP2pResumed);
       sStExtensions.mNfaDmEventP2pResumed.notifyOne();
     } break;
@@ -2174,7 +2099,7 @@ void NfcStExtensions::nfaConnectionCallback(uint8_t connEvent,
     case NFA_CE_DEREGISTERED_EVT: {
       tNFA_CE_DEREGISTERED& ce_deregistered = eventData->ce_deregistered;
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: NFA_CE_DEREGISTERED_EVT; h=0x%X", fn, ce_deregistered.handle);
+          "%s; NFA_CE_DEREGISTERED_EVT; h=0x%X", fn, ce_deregistered.handle);
       SyncEventGuard guard(sStExtensions.mNfaDmEventCeDeregistered);
       sStExtensions.mNfaDmEventCeDeregistered.notifyOne();
     } break;
@@ -2182,7 +2107,7 @@ void NfcStExtensions::nfaConnectionCallback(uint8_t connEvent,
     case NFA_CE_REGISTERED_EVT: {
       tNFA_CE_REGISTERED& ce_registered = eventData->ce_registered;
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: NFA_CE_REGISTERED_EVT; status=0x%X; h=0x%X", fn,
+          << StringPrintf("%s; NFA_CE_REGISTERED_EVT; status=0x%X; h=0x%X", fn,
                           ce_registered.status, ce_registered.handle);
       SyncEventGuard guard(sStExtensions.mNfaDmEventCeRegistered);
       sStExtensions.mNfaDmEventCeRegistered.notifyOne();
@@ -2190,139 +2115,16 @@ void NfcStExtensions::nfaConnectionCallback(uint8_t connEvent,
 
     case NFA_CE_UICC_LISTEN_CONFIGURED_EVT: {
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: NFA_CE_UICC_LISTEN_CONFIGURED_EVT", fn);
+          << StringPrintf("%s; NFA_CE_UICC_LISTEN_CONFIGURED_EVT", fn);
       SyncEventGuard guard(sStExtensions.mNfaDmEventUiccConfigured);
       sStExtensions.mNfaDmEventUiccConfigured.notifyOne();
     } break;
 
     default:
-      LOG(ERROR) << StringPrintf("%s: Event not handled here !!!", fn);
+      LOG(ERROR) << StringPrintf("%s; Event not handled here !!!", fn);
       return;
   }
 }
-
-/*******************************************************************************
- **
- ** Function:        notifyTransactionListenersOfAidSelection
- **
- ** Description:     Notify the NFC service about a transaction event from
- *secure element.
- **                  aid: Buffer contains application ID.
- **                  aidLen: Length of application ID.
- **                  host_id: host which has selected the AID.
- **
- ** Returns:         None
- **
- *******************************************************************************/
-// void NfcStExtensions::notifyTransactionListenersOfAidSelection (const
-// uint8_t* aidBuffer, uint8_t aidBufferLen, uint8_t host_id)
-//{
-//    static const char fn [] =
-//    "NfcStExtensions::notifyTransactionListenersOfAid"; LOG_IF(INFO,
-//    nfc_debug_enabled) << StringPrintf ("%s: enter; aid len=%u", fn,
-//    aidBufferLen);
-//
-//    if (aidBufferLen == 0) {
-//        return;
-//    }
-//
-//    JNIEnv* e = NULL;
-//    ScopedAttach attach(mNativeData->vm, &e);
-//    if (e == NULL) {
-//        LOG(ERROR) << StringPrintf ("%s: jni env is null", fn);
-//        return;
-//    }
-//
-//    const uint16_t tlvMaxLen = aidBufferLen + 10;
-//    uint8_t* tlv = new uint8_t [tlvMaxLen];
-//    if (tlv == NULL) {
-//        LOG(ERROR) << StringPrintf ("%s: fail allocate tlv", fn);
-//        return;
-//    }
-//
-//    memcpy (tlv, aidBuffer, aidBufferLen);
-//    uint16_t tlvActualLen = aidBufferLen;
-//
-//    ScopedLocalRef<jobject> tlvJavaArray(e, e->NewByteArray(tlvActualLen));
-//    if (tlvJavaArray.get() == NULL) {
-//        LOG(ERROR) << StringPrintf ("%s: fail allocate array", fn);
-//        goto TheEnd;
-//    }
-//
-//    e->SetByteArrayRegion ((jbyteArray)tlvJavaArray.get(), 0, tlvActualLen,
-//    (jbyte *)tlv); if (e->ExceptionCheck()) {
-//        e->ExceptionClear();
-//        LOG(ERROR) << StringPrintf ("%s: fail fill array", fn);
-//        goto TheEnd;
-//    }
-//
-//    e->CallVoidMethod (mNativeData->manager,
-//    android::gCachedNfcManagerNotifyAidSelectionReceived,
-//    tlvJavaArray.get(),(jint)host_id); if (e->ExceptionCheck()) {
-//        e->ExceptionClear();
-//        LOG(ERROR) << StringPrintf ("%s: fail notify", fn);
-//        goto TheEnd;
-//    }
-//
-// TheEnd:
-//    delete [] tlv;
-//    LOG_IF(INFO, nfc_debug_enabled) << StringPrintf ("%s: exit", fn);
-//}
-/*******************************************************************************
- **
- ** Function:        doVdcMeasurement
- **
- ** Description:     Receive connection-related events from stack.
- **                  connEvent: Event code.
- **                  eventData: Event data.
- **
- ** Returns:         None
- **
- *******************************************************************************/
-// int NfcStExtensions::doVdcMeasurement(bool isFieldOn) {
-//  static const char fn[] = "NfcStExtensions::doVdcMeasurement";
-//  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
-//  tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
-//  uint8_t dataVdc[] = { 0x00, 0x00, 0x00, 0x00 };
-//  uint8_t dataRfFieldOn[] = { 0x01, 0x00, 0x00, 0x00, 0x00 };
-//  uint8_t dataRfFieldOff[] = { 0x00, 0x00, 0x00, 0x00, 0x00 };
-//  uint8_t* dataRfFieldConfig;
-//
-//  bool isRfFieldStart = false;
-//  bool isRfFieldStop = false;
-//  bool isVdcMeasOn = false;
-//
-//  if (mVdcMeasConfig.isRfFieldOn == false) { //no RF field
-//    if (isFieldOn == true) {
-//      //Start RF field gen and VDC meas
-//      isRfFieldStart = true;
-//      dataRfFieldConfig = dataRfFieldOn;
-//      isVdcMeasOn = true;
-//      mVdcMeasConfig.isRfFieldOn = true;
-//    } else { //false
-//      //Only perform VDC meas, no field gen needed
-//      isVdcMeasOn = true;
-//    }
-//  } else { //true - RF field is generated
-//    if (isFieldOn == true) {
-//      //Start RF field gen and VDC meas
-//      isVdcMeasOn = true;
-//      mVdcMeasConfig.isRfFieldOn = true;
-//    } else { //false
-//      // Stop generating RF field
-//      isRfFieldStop = true;
-//      dataRfFieldConfig = dataRfFieldOff;
-//      mVdcMeasConfig.isRfFieldOn = false;
-//    }
-//  }
-//
-//  // If we reach this point, answer was rx, good or wrong
-//  mIsWaitingEvent.vdcMeasRslt = false;
-//
-//  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
-//
-//  return mVdcMeasConfig.measValue;
-//}
 
 /*******************************************************************************
  **
@@ -2336,7 +2138,7 @@ void NfcStExtensions::nfaConnectionCallback(uint8_t connEvent,
 void NfcStExtensions::setDefaultOffHostRoute(int route) {
   static const char fn[] = "NfcStExtensions::setDefaultOffHostRoute";
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: enter - route = 0x%x", fn, route);
+      << StringPrintf("%s; enter - route = 0x%x", fn, route);
 
   mDefaultIsoTechRoute = route;
 }
@@ -2353,7 +2155,7 @@ void NfcStExtensions::setDefaultOffHostRoute(int route) {
 int NfcStExtensions::getDefaultOffHostRoute() {
   static const char fn[] = "NfcStExtensions::getDefaultOffHostRoute";
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: enter - mDefaultIsoTechRoute = 0x%x", fn, mDefaultIsoTechRoute);
+      "%s; enter - mDefaultIsoTechRoute = 0x%x", fn, mDefaultIsoTechRoute);
 
   return mDefaultIsoTechRoute;
 }
@@ -2368,12 +2170,12 @@ int NfcStExtensions::getDefaultOffHostRoute() {
  ** Returns:
  **
  *******************************************************************************/
-/* NCI 2.0 - Begin */ bool NfcStExtensions::getProprietaryConfigSettings(
-    int prop_config_id, int byteNb, int bitNb) {
+bool NfcStExtensions::getProprietaryConfigSettings(int prop_config_id,
+                                                   int byteNb, int bitNb) {
   static const char fn[] = "NfcStExtensions::getProprietaryConfigSettings";
 
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: enter - byteNb = 0x%x, bitNb = 0x%x", fn, byteNb, bitNb);
+      "%s; enter - byteNb = 0x%x, bitNb = 0x%x", fn, byteNb, bitNb);
 
   bool status = false;
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
@@ -2389,7 +2191,7 @@ int NfcStExtensions::getDefaultOffHostRoute() {
                               nfaVsCbActionRequest);
   if (nfaStat != NFA_STATUS_OK) {
     LOG(ERROR) << StringPrintf(
-        "%s: NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
+        "%s; NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
   } else {
     mVsActionRequestEvent.wait();
     mIsWaitingEvent.getPropConfig = false;
@@ -2416,9 +2218,9 @@ void NfcStExtensions::setProprietaryConfigSettings(int prop_config_id,
                                                    bool status) {
   static const char fn[] = "NfcStExtensions::setProprietaryConfigSettings";
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: enter - byteNb = 0x%x, bitNb = 0x%x, ValueToSet = %d", fn, byteNb,
-      bitNb, status);
+  LOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; byteNb = 0x%x, bitNb = 0x%x, ValueToSet = %d", fn,
+                      byteNb, bitNb, status);
 
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
   bool currentStatus;
@@ -2431,14 +2233,14 @@ void NfcStExtensions::setProprietaryConfigSettings(int prop_config_id,
       prop_config_id, byteNb, bitNb);  // real byte number computed in there
 
   if (currentStatus == status) {  // Not change needed
-    LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s: Current status is equal to requested status - Exit", fn);
+    LOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; currentStatus == status - Exit", fn);
     return;
   }
 
   if (mPropConfigLen == 0) {
     LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: No parameters returned - Exit", fn);
+        << StringPrintf("%s; No parameters returned - Exit", fn);
     return;
   }
 
@@ -2452,7 +2254,7 @@ void NfcStExtensions::setProprietaryConfigSettings(int prop_config_id,
   setPropConfig = (uint8_t*)GKI_os_malloc(mPropConfigLen + 6);
   if (setPropConfig == NULL) {
     LOG(ERROR) << StringPrintf(
-        "%s: Could not allocate memory for setPropConfig", fn);
+        "%s; Could not allocate memory for setPropConfig", fn);
     return;
   }
   setPropConfig[0] = 0x04;
@@ -2464,18 +2266,16 @@ void NfcStExtensions::setProprietaryConfigSettings(int prop_config_id,
 
   memcpy(setPropConfig + 6, &mPropConfig.config[0], mPropConfigLen);
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: Current value in register is 0x%x", fn, mPropConfig.config[byteNb]);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; Current value: 0x%x", fn,
+                                                  mPropConfig.config[byteNb]);
   if (status == true) {
     setPropConfig[byteNb + 6] = mPropConfig.config[byteNb] | ((0x1 << bitNb));
-    LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: Requesting Value - value to set is 0x%x", fn,
-                        setPropConfig[byteNb + 6]);
+    LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        "%s; Requested Value: 0x%x", fn, setPropConfig[byteNb + 6]);
   } else {
     setPropConfig[byteNb + 6] = mPropConfig.config[byteNb] & ~(0x1 << bitNb);
-    LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: Requesting Value - value to set is 0x%x", fn,
-                        setPropConfig[byteNb + 6]);
+    LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        "%s; Requested Value: 0x%x", fn, setPropConfig[byteNb + 6]);
   }
 
   {
@@ -2487,7 +2287,7 @@ void NfcStExtensions::setProprietaryConfigSettings(int prop_config_id,
                                 setPropConfig, nfaVsCbActionRequest);
     if (nfaStat != NFA_STATUS_OK) {
       LOG(ERROR) << StringPrintf(
-          "%s: NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
+          "%s; NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
     } else {
       mVsActionRequestEvent.wait();
       mIsWaitingEvent.setPropConfig = false;
@@ -2504,7 +2304,6 @@ void NfcStExtensions::setProprietaryConfigSettings(int prop_config_id,
   }
   gIsReconfiguringDiscovery.end();
 }
-/* NCI 2.0 - End */
 
 /*******************************************************************************
  **
@@ -2519,7 +2318,7 @@ void NfcStExtensions::setProprietaryConfigSettings(int prop_config_id,
 void NfcStExtensions::setP2pPausedStatus(bool status) {
   static const char fn[] = "NfcStExtensions::setP2pPausedStatus";
   LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: enter; current status is mIsP2pPaused = %d, new status is %d", fn,
+      "%s; enter; current status is mIsP2pPaused = %d, new status is %d", fn,
       mIsP2pPaused, status);
 
   mIsP2pPaused = status;
@@ -2538,7 +2337,7 @@ void NfcStExtensions::setP2pPausedStatus(bool status) {
 bool NfcStExtensions::getP2pPausedStatus() {
   static const char fn[] = "NfcStExtensions::getP2pPausedStatus";
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: enter; mIsP2pPaused = %d", fn, mIsP2pPaused);
+      << StringPrintf("%s; enter; mIsP2pPaused = %d", fn, mIsP2pPaused);
 
   return mIsP2pPaused;
 }
@@ -2556,12 +2355,11 @@ bool NfcStExtensions::getP2pPausedStatus() {
  *******************************************************************************/
 int NfcStExtensions::getATR(uint8_t* atr) {
   static const char fn[] = "NfcStExtensions::getATR";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", fn);
   int i, length = 0xff;
 
   length = StSecureElement::getInstance().mAtrInfo.length;
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: ATR length = %d;", fn, length);
+      << StringPrintf("%s; ATR length = %d;", fn, length);
 
   for (i = 0; i < length; i++) {
     *(atr + i) = StSecureElement::getInstance().mAtrInfo.data[i];
@@ -2584,6 +2382,9 @@ bool NfcStExtensions::EnableSE(int se_id, bool enable) {
   static const char fn[] = "NfcStExtensions::EnableSE";
   bool result = false;
 
+  LOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; se_id = 0x%02X; enable: %d", fn, se_id, enable);
+
   if ((se_id & 0x80) != 0) {  // HCI-NFCEE
     if ((enable == true) &&
         ((se_id == 0x82) || (se_id == 0x84) || (se_id == 0x86))) {
@@ -2594,14 +2395,12 @@ bool NfcStExtensions::EnableSE(int se_id, bool enable) {
         ((se_id == 0x82) || (se_id == 0x84) || (se_id == 0x86))) {
       mIsEseActiveForWA = enable;
       LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: mIsEseActiveForWA = %d", fn, enable);
+          << StringPrintf("%s; mIsEseActiveForWA = %d", fn, enable);
     }
     mEseActivationOngoing = false;
   } else {  // NDEF NFCEE
     result = StCardEmulationEmbedded::getInstance().enable(se_id, enable);
   }
-
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
 
   return result;
 }
@@ -2621,17 +2420,17 @@ int NfcStExtensions::connectGate(int gate_id, int host_id) {
   static const char fn[] = "NfcStExtensions::connectGate";
   int pipe_id = 0xFF;
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
 
   pipe_id = prepareGateForTest(gate_id, host_id);
 
   if (pipe_id != 0xFF) {
     LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: Allocated pipe 0x%x for gate 0x%x on host 0x%x",
+        << StringPrintf("%s; Allocated pipe 0x%x for gate 0x%x on host 0x%x",
                         fn, pipe_id, gate_id, host_id);
   } else {
     LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: Pipe creation failed for gate 0x%x on host 0x%x",
+        << StringPrintf("%s; Pipe creation failed for gate 0x%x on host 0x%x",
                         fn, gate_id, host_id);
   }
 
@@ -2660,7 +2459,7 @@ bool NfcStExtensions::transceive(uint8_t pipeId, uint8_t hciCmd,
 
   mSentHciCmd = hciCmd;
   mIsWaitingEvent.propHciRsp = true;
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
   {
     SyncEventGuard guard(mHciRspRcvdEvent);
     nfaStat = NFA_HciSendCommand(mNfaStExtHciHandle, pipeId, hciCmd,
@@ -2668,10 +2467,10 @@ bool NfcStExtensions::transceive(uint8_t pipeId, uint8_t hciCmd,
     if (nfaStat == NFA_STATUS_OK) {
       waitOk = mHciRspRcvdEvent.wait(1000);
       if (waitOk == false) {  // timeout occurs
-        LOG(ERROR) << StringPrintf("%s: wait response timeout", fn);
+        LOG(ERROR) << StringPrintf("%s; wait response timeout", fn);
       }
     } else {
-      LOG(ERROR) << StringPrintf("%s: fail send data; error=0x%X", fn, nfaStat);
+      LOG(ERROR) << StringPrintf("%s; fail send data; error=0x%X", fn, nfaStat);
       mIsWaitingEvent.propHciRsp = false;
       return false;
     }
@@ -2680,7 +2479,7 @@ bool NfcStExtensions::transceive(uint8_t pipeId, uint8_t hciCmd,
   mIsWaitingEvent.propHciRsp = false;
 
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: received data of length 0x%02X", fn, mRxHciDataLen);
+      << StringPrintf("%s; received data of length 0x%02X", fn, mRxHciDataLen);
 
   recvBufferActualSize = mRxHciDataLen;
   for (i = 0; i < mRxHciDataLen; i++) {
@@ -2703,7 +2502,7 @@ bool NfcStExtensions::transceive(uint8_t pipeId, uint8_t hciCmd,
  *******************************************************************************/
 void NfcStExtensions::disconnectGate(uint8_t pipeId) {
   static const char fn[] = "NfcStExtensions::disconnectGate";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
 
   SyncEventGuard guard(mNfaHciEventRcvdEvent);
@@ -2711,32 +2510,126 @@ void NfcStExtensions::disconnectGate(uint8_t pipeId) {
   if (nfaStat == NFA_STATUS_OK) {
     mNfaHciEventRcvdEvent.wait();  // wait for NFA_HCI_CLOSE_PIPE_EVT
   } else {
-    LOG(ERROR) << StringPrintf("%s: error during NFA method call; error=0x%X",
+    LOG(ERROR) << StringPrintf("%s; error during NFA method call; error=0x%X",
                                fn, nfaStat);
   }
 }
 
 /*******************************************************************************
  **
- ** Function:        setNfccPowerMode
+ ** Function:        needUnmuteTechForObserverMode
  **
- ** Description:     Set the host power mode to the NFCC.
- **                  transport : Transport action to perform :
- **                  			0x0 : Keep the NCI DH connected.
- **                  			0x4 : Disconnect transport interface..
- **                  powermode: Host power mode
+ ** Description:
  **
  ** Returns:
  **
  *******************************************************************************/
-// void NfcStExtensions::setNfccPowerMode(int transport, int powermode) {
-//  static const char fn[] = "NfcStExtensions::setNfccPowerMode";
-//  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
-//  uint8_t mCmdData[] = { (uint8_t) transport, (uint8_t) powermode };
-//
-//
-//  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
-//}
+bool NfcStExtensions::needUnmuteTechForObserverMode() {
+  // TER 24734 changes the behavior of observer mode so the mute techs are
+  // ignored.
+
+  bool ter24734 = false;
+
+  if ((mHwInfo & 0xFF00) == 0x0400) {
+    // ST21NFCD(54H) -- only in branch 13.x
+    if (((mFwInfo & 0x1F000000) >= 0x13000000) &&
+        ((mFwInfo & 0x0000FFFF) >= 0x00009435)) {
+      ter24734 = true;
+    }
+  } else if ((mHwInfo & 0xFF00) == 0x0500) {
+    // ST54J/K -- since 3.13.9435
+    if (((mFwInfo & 0x0F000000) >= 0x03000000) &&
+        ((mFwInfo & 0x0000FFFF) >= 0x00009435)) {
+      ter24734 = true;
+    }
+  } else {
+    // newer chips: assumed to be by default.
+    ter24734 = true;
+  }
+
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; TER24734: %s", __func__,
+                                                   ter24734 ? "true" : "false");
+  return !ter24734;
+}
+
+/*******************************************************************************
+ **
+ ** Function:        setObserverMode
+ **
+ ** Description:
+ **
+ ** Returns:
+ **
+ *******************************************************************************/
+bool NfcStExtensions::setObserverMode(bool enable) {
+  uint8_t param[1];
+  bool wasStopped = false;
+  tNFA_STATUS status = NFA_STATUS_FAILED;
+
+  param[0] = (enable ? 1 : 0);
+  LOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; enable: %d", __func__, enable);
+
+  gIsReconfiguringDiscovery.start();
+  if (android::isDiscoveryStarted()) {
+    // Stop RF Discovery if we were polling
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; stop discovery reconfiguring", __func__);
+    android::startRfDiscovery(false);
+    wasStopped = true;
+  }
+
+  if (needUnmuteTechForObserverMode()) mIsObserverMode = enable;
+
+  status =
+      NFA_SetConfig(NCI_PARAM_ID_PROP_OBSERVER_MODE, sizeof(param), &param[0]);
+
+  // Update MuteTec/RT accordingly
+  uint8_t muteTechBitmap = StRoutingManager::getInstance().getMuteTech();
+
+  if (needUnmuteTechForObserverMode() && muteTechBitmap != 0) {
+    if (enable) {
+      // Disable MuteTech
+      NFA_SetMuteTech(false, false, false);
+    } else {
+      // Restore MuteTech
+      NFA_SetMuteTech(((muteTechBitmap & NFA_TECHNOLOGY_MASK_A) != 0),
+                      ((muteTechBitmap & NFA_TECHNOLOGY_MASK_B) != 0),
+                      ((muteTechBitmap & NFA_TECHNOLOGY_MASK_F) != 0));
+    }
+
+    // Update RT
+    StRoutingManager::getInstance().updateRoutingTable();
+    StRoutingManager::getInstance().commitRouting();
+  }
+  if (wasStopped) {
+    // start discovery
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; reconfigured start discovery", __func__);
+    android::startRfDiscovery(true);
+  }
+  gIsReconfiguringDiscovery.end();
+
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", __func__);
+
+  return (status == NFA_STATUS_FAILED ? false : true);
+}
+
+/*******************************************************************************
+ **
+ ** Function:        getObserverMode
+ **
+ ** Description:
+ **
+ ** Returns:
+ **
+ *******************************************************************************/
+bool NfcStExtensions::getObserverMode() {
+  LOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; mIsObserverMode: %d", __func__, mIsObserverMode);
+
+  return mIsObserverMode;
+}
 
 /*******************************************************************************
  **
@@ -2758,7 +2651,7 @@ void NfcStExtensions::disconnectGate(uint8_t pipeId) {
 
 bool NfcStExtensions::checkListenAPassiveOnSE() {
   static const char fn[] = "NfcStExtensions::checkListenAPassiveOnSE";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
 
   int i;
   uint8_t seList[2] = {0x02, 0xc0};
@@ -2766,17 +2659,15 @@ bool NfcStExtensions::checkListenAPassiveOnSE() {
   uint8_t bitmap = 0;
 
   // Need to be called only once
-  /* NCI 2.0 - Begin */
   getPipesInfo();
-  /* NCI 2.0 - End */
 
   for (i = 0; i < 2; i++) {
     LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: Checking if %02X is connected", fn, seList[i]);
+        << StringPrintf("%s; Checking if %02X is connected", fn, seList[i]);
     if (isSEConnected(seList[i]) == true) {
       bitmap |= SE_CONNECTED_MASK;
       LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: %02X is connected, check presence of A Card RF gate/pipe", fn,
+          "%s; %02X is connected, check presence of A Card RF gate/pipe", fn,
           seList[i]);
 
       // Check if pipe for A Card RF gate was created on that SE
@@ -2794,7 +2685,7 @@ bool NfcStExtensions::checkListenAPassiveOnSE() {
   // tech
   if (bitmap == (SE_CONNECTED_MASK | B_CARD_RF_GATE_MASK)) {
     LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s: Removing Listen A passive from RF configuration", fn);
+        "%s; Removing Listen A passive from RF configuration", fn);
     memcpy(techArray, mRfConfig.techArray, sizeof(mRfConfig.techArray));
     techArray[P2P_LISTEN_IDX] &= ~NFA_TECHNOLOGY_MASK_A;
     setRfConfiguration(mRfConfig.modeBitmap, techArray);
@@ -2805,7 +2696,6 @@ bool NfcStExtensions::checkListenAPassiveOnSE() {
   return false;
 }
 
-/* NCI 2.0 - Begin */
 /*******************************************************************************
  **
  ** Function:        setNciConfig
@@ -2820,7 +2710,7 @@ bool NfcStExtensions::checkListenAPassiveOnSE() {
  *******************************************************************************/
 void NfcStExtensions::setNciConfig(int param_id, uint8_t* param, int length) {
   static const char fn[] = "NfcStExtensions::setNciConfig";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
   bool mustRestartDiscovery = false;
   uint8_t nfa_set_config[] = {0x00};
@@ -2843,7 +2733,7 @@ void NfcStExtensions::setNciConfig(int param_id, uint8_t* param, int length) {
     if (nfaStat == NFA_STATUS_OK) {
       mNfaConfigEvent.wait();  // wait for NFA_DM_SET_CONFIG_EVT
     } else {
-      LOG(ERROR) << StringPrintf("%s: NFA_SetConfig() failed; error=0x%X", fn,
+      LOG(ERROR) << StringPrintf("%s; NFA_SetConfig() failed; error=0x%X", fn,
                                  nfaStat);
     }
   }
@@ -2854,7 +2744,7 @@ void NfcStExtensions::setNciConfig(int param_id, uint8_t* param, int length) {
     if (nfaStat == NFA_STATUS_OK) {
       mNfaConfigEvent.wait();  // wait for NFA_DM_SET_CONFIG_EVT
     } else {
-      LOG(ERROR) << StringPrintf("%s: NFA_SetConfig() failed; error=0x%X", fn,
+      LOG(ERROR) << StringPrintf("%s; NFA_SetConfig() failed; error=0x%X", fn,
                                  nfaStat);
     }
   }
@@ -2881,7 +2771,7 @@ void NfcStExtensions::setNciConfig(int param_id, uint8_t* param, int length) {
 void NfcStExtensions::getNciConfig(int param_id, uint8_t* param,
                                    uint16_t& length) {
   static const char fn[] = "NfcStExtensions::getNciConfig";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
   tNFA_PMID data[1] = {0x00};
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
 
@@ -2892,7 +2782,7 @@ void NfcStExtensions::getNciConfig(int param_id, uint8_t* param,
   if (nfaStat == NFA_STATUS_OK) {
     mNfaConfigEvent.wait();  // wait for NFA_DM_GET_CONFIG_EVT
   } else {
-    LOG(ERROR) << StringPrintf("%s: NFA_GetConfig() failed; error=0x%X", fn,
+    LOG(ERROR) << StringPrintf("%s; NFA_GetConfig() failed; error=0x%X", fn,
                                nfaStat);
   }
 
@@ -2922,7 +2812,7 @@ void NfcStExtensions::notifyNciConfigCompletion(bool isGet, uint16_t length,
                                                 uint8_t* param) {
   static const char fn[] = "NfcStExtensions::notifyNciConfigCompletion";
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: isGet = %d, length = 0x%02X", fn, isGet, length);
+      << StringPrintf("%s; isGet = %d, length = 0x%02X", fn, isGet, length);
 
   if (isGet) {
     sStExtensions.mNfaConfigLength = length;
@@ -2945,7 +2835,7 @@ void NfcStExtensions::notifyNciConfigCompletion(bool isGet, uint16_t length,
 void NfcStExtensions::sendPropSetConfig(int configSubSetId, int paramId,
                                         uint8_t* param, uint32_t length) {
   static const char fn[] = "NfcStExtensions::sendPropSetConfig";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
 
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
   uint8_t* setPropConfig;
@@ -2961,7 +2851,7 @@ void NfcStExtensions::sendPropSetConfig(int configSubSetId, int paramId,
   setPropConfig = (uint8_t*)GKI_os_malloc(length + 6);
   if (setPropConfig == NULL) {
     LOG(ERROR) << StringPrintf(
-        "%s: Could not allocate memory for setPropConfig", fn);
+        "%s; Could not allocate memory for setPropConfig", fn);
     return;
   }
   setPropConfig[0] = 0x04;
@@ -2982,7 +2872,7 @@ void NfcStExtensions::sendPropSetConfig(int configSubSetId, int paramId,
                                 setPropConfig, nfaVsCbActionRequest);
     if (nfaStat != NFA_STATUS_OK) {
       LOG(ERROR) << StringPrintf(
-          "%s: NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
+          "%s; NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
     } else {
       mVsActionRequestEvent.wait();
       mIsWaitingEvent.setPropConfig = false;
@@ -3021,7 +2911,7 @@ void NfcStExtensions::sendPropGetConfig(int configSubSetId, int paramId,
                                         uint8_t* param, uint16_t& length) {
   static const char fn[] = "NfcStExtensions::sendPropGetConfig";
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: enter (subSetId=0x%x)", fn, configSubSetId);
+      << StringPrintf("%s; enter (subSetId=0x%x)", fn, configSubSetId);
 
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
   uint8_t getPropConfig[5];
@@ -3048,14 +2938,14 @@ void NfcStExtensions::sendPropGetConfig(int configSubSetId, int paramId,
       NFA_SendVsCommand(OID_ST_VS_CMD, 5, getPropConfig, nfaVsCbActionRequest);
   if (nfaStat != NFA_STATUS_OK) {
     LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s: NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
+        "%s; NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
   } else {
     mVsActionRequestEvent.wait();
     mIsWaitingEvent.getPropConfig = false;
 
     length = mPropConfigLen;
     LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: data received, length=%d", fn, length);
+        << StringPrintf("%s; data received, length=%d", fn, length);
     memcpy(param, (mPropConfig.config), length);
   }
   mIsWaitingEvent.getPropConfig = false;
@@ -3080,18 +2970,12 @@ void NfcStExtensions::sendPropTestCmd(int OID, int subCode, uint8_t* paramTx,
                                       uint16_t lengthTx, uint8_t* paramRx,
                                       uint16_t& lengthRx) {
   static const char fn[] = "NfcStExtensions::sendPropTestCmd";
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
 
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
   uint8_t* sendTestCmd;
   int mOID = OID_ST_TEST_CMD;
 
-  // Transmission of PROP_TEST_XX_CMD is not allowed in RFST_DISCOVERY state
-  //    if (android::isDiscoveryStarted())
-  //    {
-  //        //Stop RF discovery
-  //        android::startRfDiscovery(false);
-  //    }
   if (OID == OID_ST_PROP_CMD) {
     mOID = OID_ST_PROP_CMD;
   } else if (OID == OID_ST_VS_CMD) {
@@ -3099,14 +2983,14 @@ void NfcStExtensions::sendPropTestCmd(int OID, int subCode, uint8_t* paramTx,
   }
 
   if (nfaStat != NFA_STATUS_OK) {
-    LOG(ERROR) << StringPrintf("%s: fail to register; error=0x%X", fn, nfaStat);
+    LOG(ERROR) << StringPrintf("%s; fail to register; error=0x%X", fn, nfaStat);
   }
   mPropTestRspPtr = NULL;
   mPropTestRspLen = 0;
 
   sendTestCmd = (uint8_t*)GKI_os_malloc(lengthTx + 1);
   if (sendTestCmd == NULL) {
-    LOG(ERROR) << StringPrintf("%s: Could not allocate memory for sendTestCmd",
+    LOG(ERROR) << StringPrintf("%s; Could not allocate memory for sendTestCmd",
                                fn);
     return;
   }
@@ -3127,7 +3011,7 @@ void NfcStExtensions::sendPropTestCmd(int OID, int subCode, uint8_t* paramTx,
                                     nfaVsCbActionRequest);
         if (nfaStat != NFA_STATUS_OK) {
           LOG(ERROR) << StringPrintf(
-              "%s: NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
+              "%s; NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
         } else {
           mVsCallbackEvent.wait();
         }
@@ -3143,7 +3027,7 @@ void NfcStExtensions::sendPropTestCmd(int OID, int subCode, uint8_t* paramTx,
                                   nfaVsCbActionRequest);
       if (nfaStat != NFA_STATUS_OK) {
         LOG(ERROR) << StringPrintf(
-            "%s: NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
+            "%s; NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
       } else {
         mVsActionRequestEvent.wait();
       }
@@ -3168,7 +3052,7 @@ void NfcStExtensions::sendPropTestCmd(int OID, int subCode, uint8_t* paramTx,
   }
 
   if (nfaStat != NFA_STATUS_OK) {
-    LOG(ERROR) << StringPrintf("%s: fail to register; error=0x%X", fn, nfaStat);
+    LOG(ERROR) << StringPrintf("%s; fail to register; error=0x%X", fn, nfaStat);
   }
 }
 
@@ -3183,11 +3067,6 @@ void NfcStExtensions::sendPropTestCmd(int OID, int subCode, uint8_t* paramTx,
  *******************************************************************************/
 int NfcStExtensions::getAvailableHciHostList(uint8_t* nfceeId,
                                              uint8_t* conInfo) {
-  static const char fn[] = "NfcStExtensions::getAvailableHciHostList";
-
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
-
-  // StSecureElement::getInstance().getHostList();
   return StSecureElement::getInstance().retrieveHostList(nfceeId, conInfo);
 }
 
@@ -3204,7 +3083,7 @@ int NfcStExtensions::getAvailableHciHostList(uint8_t* nfceeId,
 void NfcStExtensions::ApplyPropRFConfig() {
   static const char fn[] = "NfcStExtensions::ApplyPropRFConfig";
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
   SyncEventGuard guard(mVsActionRequestEvent);
   uint8_t mPropApplyRfConfig[] = {0x0A};
 
@@ -3212,7 +3091,7 @@ void NfcStExtensions::ApplyPropRFConfig() {
                               nfaVsCbActionRequest);
   if (nfaStat != NFA_STATUS_OK) {
     LOG(ERROR) << StringPrintf(
-        "%s: NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
+        "%s; NFA_SendVsCommand() call failed; error=0x%X", fn, nfaStat);
   } else {
     mVsActionRequestEvent.wait();
   }
@@ -3246,6 +3125,7 @@ int NfcStExtensions::FwTsDiffToMs(uint32_t fwtsstart, uint32_t fwtsend) {
 #define T_CERx 0x09
 #define T_fieldOn 0x10
 #define T_fieldOff 0x11
+#define T_fieldSenseStopped 0x17
 #define T_fieldLevel 0x18
 #define T_CERxError 0x19
 #define T_TxAct 0x30
@@ -3330,7 +3210,7 @@ void NfcStExtensions::StHandleLogDataDynParams(uint8_t format,
                 if (fw_cur_set != sRfDynParamSet) {
                   LOG_IF(INFO, nfc_debug_enabled)
                       << fn
-                      << StringPrintf(": Firmware switched dynamic params %d",
+                      << StringPrintf("; Firmware switched dynamic params %d",
                                       mDynRotatedByFw);
                   if (++mDynRotatedByFw > 3) {
                     mDynFwState = DYN_ST_INITIAL;
@@ -3511,10 +3391,10 @@ void NfcStExtensions::StMatchSendTriggerPayload(uint8_t nfcee, uint8_t* buf,
   ScopedAttach attach(mNativeData->vm, &e);
   LOG_IF(INFO, nfc_debug_enabled)
       << fn
-      << StringPrintf(": send (%x) %db: %02x%02x...", nfcee, len, buf[0],
+      << StringPrintf("; send (%x) %db: %02x%02x...", nfcee, len, buf[0],
                       buf[1]);
   if (e == NULL) {
-    LOG(ERROR) << StringPrintf("jni env is null");
+    LOG(ERROR) << StringPrintf("%s; jni env is null", __func__);
     return;
   }
   ScopedLocalRef<jbyteArray> ntfData(e, e->NewByteArray(len));
@@ -3535,7 +3415,7 @@ void NfcStExtensions::StMatchStoreActionAid(uint8_t nfcee, uint8_t* aid,
   }
   LOG_IF(INFO, nfc_debug_enabled)
       << fn
-      << StringPrintf(": store (%x) %db: %02x%02x...%02x", nfcee, len,
+      << StringPrintf("; store (%x) %db: %02x%02x...%02x", nfcee, len,
                       (len > 0) ? aid[0] : 0, (len > 1) ? aid[1] : 0,
                       (len > 0) ? aid[len - 1] : 0);
   if (len) memcpy(&mMatchSelectedAid[16 * mMatchSelectedCurrent], aid, len);
@@ -3544,11 +3424,11 @@ void NfcStExtensions::StMatchStoreActionAid(uint8_t nfcee, uint8_t* aid,
   mMatchSelectedCurrent++;
   LOG_IF(INFO, nfc_debug_enabled)
       << fn
-      << StringPrintf(": mMatchSelectedCurrent=%d", mMatchSelectedCurrent);
+      << StringPrintf("; mMatchSelectedCurrent=%d", mMatchSelectedCurrent);
   if (mMatchSelectPartialCurrent > 0) {
     // retry now.
     LOG_IF(INFO, nfc_debug_enabled)
-        << fn << StringPrintf(": check if we had received it in logs already");
+        << fn << StringPrintf("; check if we had received it in logs already");
     StMatchGotLogSw(true, 0, 0);
   }
 }
@@ -3561,7 +3441,7 @@ void NfcStExtensions::StMatchGotLogPartialAid(uint8_t* aidBeg, int aidBegLen,
   LOG_IF(INFO, nfc_debug_enabled)
       << fn
       << StringPrintf(
-             ": Matched SELECT, [%d] %d(%d)b: %02x%02x...%02x%02x",
+             "; Matched SELECT, [%d] %d(%d)b: %02x%02x...%02x%02x",
              mMatchSelectPartialCurrent, fullLen, aidBegLen + aidEndLen,
              (aidBegLen > 0) ? aidBeg[0] : 0, (aidBegLen > 1) ? aidBeg[1] : 0,
              (aidEndLen > 0) ? aidEnd[0] : 0, (aidEndLen > 1) ? aidEnd[1] : 0);
@@ -3574,7 +3454,7 @@ void NfcStExtensions::StMatchGotLogPartialAid(uint8_t* aidBeg, int aidBegLen,
     LOG_IF(INFO, nfc_debug_enabled)
         << fn
         << StringPrintf(
-               ": discard old FW log, %d(%d)b: %02x%02x...%02x%02x SW "
+               "; discard old FW log, %d(%d)b: %02x%02x...%02x%02x SW "
                "%02hhx%02hhx",
                mMatchSelectPartialOrigLen[0],
                mMatchSelectPartialAidBegLen[0] +
@@ -3620,7 +3500,7 @@ void NfcStExtensions::StMatchGotLogSw(bool rematch, uint8_t sw1, uint8_t sw2) {
   if (!rematch) {
     LOG_IF(INFO, nfc_debug_enabled)
         << fn
-        << StringPrintf(": Got SW %02x%02x, mMatchSelectPartialCurrent=%d", sw1,
+        << StringPrintf("; Got SW %02x%02x, mMatchSelectPartialCurrent=%d", sw1,
                         sw2, mMatchSelectPartialCurrent);
     // store the SW in the table
     mMatchSelectPartialSw[2 * mMatchSelectPartialCurrent] = sw1;
@@ -3653,7 +3533,7 @@ void NfcStExtensions::StMatchGotLogSw(bool rematch, uint8_t sw1, uint8_t sw2) {
                                            mMatchSelectPartialAidBegLen[j]],
                    mMatchSelectPartialAidEndLen[j]))) {
         LOG_IF(INFO, nfc_debug_enabled)
-            << fn << StringPrintf(": matched=#%d-%d", i, j);
+            << fn << StringPrintf("; matched=#%d-%d", i, j);
         break;
       }
     }
@@ -3680,7 +3560,7 @@ void NfcStExtensions::StMatchGotLogSw(bool rematch, uint8_t sw1, uint8_t sw2) {
         LOG_IF(INFO, nfc_debug_enabled)
             << fn
             << StringPrintf(
-                   ": discard old FW log(%d), %d(%d)b: %02x%02x...%02x%02x SW "
+                   "; discard old FW log(%d), %d(%d)b: %02x%02x...%02x%02x SW "
                    "%02hhx%02hhx",
                    i, mMatchSelectPartialOrigLen[i],
                    mMatchSelectPartialAidBegLen[i] +
@@ -3738,7 +3618,7 @@ void NfcStExtensions::StMatchPurgeActionAid(int num, bool skipLast) {
   mMatchSelectedCurrent = j;
   LOG_IF(INFO, nfc_debug_enabled)
       << fn
-      << StringPrintf(": purged %d(real:%d) remains %d", num, i,
+      << StringPrintf("; purged %d(real:%d) remains %d", num, i,
                       mMatchSelectedCurrent);
 }
 
@@ -3872,7 +3752,7 @@ void NfcStExtensions::StMatchSelectSw(uint8_t format, uint16_t data_len,
           U_FALLTHROUGH;
         case T_fieldLevel:
           LOG_IF(INFO, nfc_debug_enabled)
-              << fn << ": mMatchSelectState = MATCH_SEL_ST_INITIAL";
+              << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
           mMatchSelectState = MATCH_SEL_ST_INITIAL;
           break;
         case T_CERxError: {
@@ -3889,7 +3769,7 @@ void NfcStExtensions::StMatchSelectSw(uint8_t format, uint16_t data_len,
         case T_CERx: {
           realLen = p_data[offset] << 8 | p_data[offset + 1];
           LOG_IF(INFO, nfc_debug_enabled)
-              << fn << StringPrintf(": realLen=%d", realLen);
+              << fn << StringPrintf("; realLen=%d", realLen);
           offset += 2;
           realLenDataStart = offset;
           SoD = p_data[offset];
@@ -3902,7 +3782,7 @@ void NfcStExtensions::StMatchSelectSw(uint8_t format, uint16_t data_len,
           if (SoD & 0x4) offset++;  // skip NAD
           if (SoD & 0x8) offset++;  // skip DID
           LOG_IF(INFO, nfc_debug_enabled)
-              << fn << StringPrintf(": INS=0x%02hhx", p_data[offset + 1]);
+              << fn << StringPrintf("; INS=0x%02hhx", p_data[offset + 1]);
           // Are we receiving a SELECT ?
           if (p_data[offset + 1] == 0xA4) {
             // offset+4 = Lc, then payload and tail (until data_len)
@@ -3915,7 +3795,7 @@ void NfcStExtensions::StMatchSelectSw(uint8_t format, uint16_t data_len,
             if ((tailLen > 1) || (realAidLen > 16)) {
               LOG_IF(INFO, nfc_debug_enabled)
                   << fn
-                  << StringPrintf(": tailLen=0x%02hhx realAidLen=0x%02hhx skip",
+                  << StringPrintf("; tailLen=0x%02hhx realAidLen=0x%02hhx skip",
                                   tailLen, realAidLen);
               return;
             }
@@ -3946,14 +3826,14 @@ void NfcStExtensions::StMatchSelectSw(uint8_t format, uint16_t data_len,
           U_FALLTHROUGH;
         case T_fieldLevel:
           LOG_IF(INFO, nfc_debug_enabled)
-              << fn << ": mMatchSelectState = MATCH_SEL_ST_INITIAL";
+              << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
           mMatchSelectState = MATCH_SEL_ST_INITIAL;
           break;
 
         case T_RxI: {
           realLen = p_data[3];
           LOG_IF(INFO, nfc_debug_enabled)
-              << fn << StringPrintf(": realLen=%d", realLen);
+              << fn << StringPrintf("; realLen=%d", realLen);
           offset = 5;  // HCI packet header
           bool has_cb = (p_data[offset] & 0x80) == 0x80;
           uint8_t pid = p_data[offset] & 0x7F;
@@ -4037,7 +3917,7 @@ void NfcStExtensions::StMonitorSeActivationWATriggered(NfcStExtensions* inst) {
   // Restart the stack to force CLF reset, which resets ST54H_SE
   LOG(ERROR) << "Restart NFC to trigger full init again";
   e->CallVoidMethod(inst->mNativeData->manager,
-                    android::gCachedNfcManagerNotifyESEUnrecoverable);
+                    android::gCachedNfcManagerNotifyHwErrorReported);
 }
 
 void NfcStExtensions::StMonitorSeActivation(uint8_t format, uint16_t data_len,
@@ -4204,7 +4084,7 @@ void NfcStExtensions::StEseMonitor(uint8_t format, uint16_t data_len,
                      ? newParamLen
                      : sizeof(mLastReceivedParam));
           LOG_IF(INFO, nfc_debug_enabled)
-              << fn << StringPrintf(" saved param: %02hhx", p_data[7]);
+              << fn << StringPrintf("; saved param: %02hhx", p_data[7]);
         }
       } else {
         // we received an I-frame but it is not ANY-SET-PARAM
@@ -4349,7 +4229,7 @@ void NfcStExtensions::StClfFieldMonitor(uint8_t format, uint16_t data_len,
           (void*)this);
       if (ret != 0) {
         LOG(ERROR) << StringPrintf(
-            "Failed to create StClfFieldMonitorWorker %d", ret);
+            "%s; Failed to create StClfFieldMonitorWorker %d", __func__, ret);
         mStClfFieldMonitorInRemoteField = false;
       }
 
@@ -4365,7 +4245,7 @@ void NfcStExtensions::StClfFieldMonitor(uint8_t format, uint16_t data_len,
         ret = pthread_join(mStClfFieldMonitorThread, &r);
         if (ret != 0) {
           LOG(ERROR) << StringPrintf(
-              "Failed to join StClfFieldMonitorWorker %d", ret);
+              "%s; Failed to join StClfFieldMonitorWorker %d", __func__, ret);
         }
         mStClfFieldMonitorThread = (pthread_t)NULL;
       } else {
@@ -4436,13 +4316,15 @@ void NfcStExtensions::StHandleVsLogData(uint16_t data_len, uint8_t* p_data) {
   int idx;
   bool doSendUpper = false;
   bool doSendActionUpper = false;
+  bool doPollingLoopData = false;
 
   LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s : data_len=  0x%04X ", fn, data_len);
+      << StringPrintf("%s; data_len: 0x%04X ", fn, data_len);
 
   {
     SyncEventGuard guard(mVsLogDataEvent);
     doSendActionUpper = mSendNfceeActionNtfToUpper;
+    doPollingLoopData = mCollectReaderPollingLoopData;
   }
 
   for (idx = 0;; ++idx) {
@@ -4481,6 +4363,12 @@ void NfcStExtensions::StHandleVsLogData(uint16_t data_len, uint8_t* p_data) {
       StClfFieldMonitor(p_data[3], current_tlv_length, p_data + current_tlv_pos,
                         current_tlv_pos + current_tlv_length >= data_len);
     }
+    // Processor for polling loop data
+    if (doPollingLoopData) {
+      StHandlePollingLoopData(p_data[3], current_tlv_length,
+                              p_data + current_tlv_pos,
+                              current_tlv_pos + current_tlv_length >= data_len);
+    }
     // go to next TLV
     current_tlv_pos = current_tlv_pos + current_tlv_length;
   }  // idx is now the number of TLVs
@@ -4494,7 +4382,7 @@ void NfcStExtensions::StHandleVsLogData(uint16_t data_len, uint8_t* p_data) {
     JNIEnv* e = NULL;
     ScopedAttach attach(mNativeData->vm, &e);
     if (e == NULL) {
-      LOG(ERROR) << StringPrintf("jni env is null");
+      LOG(ERROR) << StringPrintf("%s; jni env is null", __func__);
       return;
     }
     ////////////////////////////////////////////////////////////////////////////////
@@ -4526,6 +4414,7 @@ void NfcStExtensions::StHandleVsLogData(uint16_t data_len, uint8_t* p_data) {
                       (jint)(int)p_data[3], tlv_list.get());
   }
 }
+
 /*******************************************************************************
 **
 ** Function:        StVsCallback
@@ -4540,30 +4429,18 @@ void NfcStExtensions::StHandleVsLogData(uint16_t data_len, uint8_t* p_data) {
 void NfcStExtensions::StVsCallback(tNFC_VS_EVT event, uint16_t data_len,
                                    uint8_t* p_data) {
   static const char fn[] = "NfcStExtensions::StVsCallback";
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s : event = 0x%02X", fn, event);
+
   if (data_len < 5) {
-    LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s : data_len = 0x%X", fn, data_len);
+    LOG(WARNING) << StringPrintf("%s : data_len = 0x%X", fn, data_len);
     return;
   }
+
   if (p_data[1] == 0x03 && p_data[4] == 0xCA) {
-    LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s ARACH : 1:3:4 = 0x%02X:0x%02X:0x%02X", fn,
-                        p_data[1], p_data[3], p_data[4]);
     NfcStExtensions::getInstance().StHandleDetectionFOD(p_data[5]);
     return;
-
   } else if (p_data[1] == 0x03) {
-    LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s : 1:3:4 = 0x%02X:0x%02X:0x%02X", fn, p_data[1],
-                        p_data[3], p_data[4]);
-
     if (p_data[3] == NFA_STATUS_OK) {
       sStExtensions.mPropTestRspLen = p_data[2] - 1;  // Payload minus status
-
-      LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: mPropTestRspLen = %d", fn, sStExtensions.mPropTestRspLen);
 
       // Alocate needed memory if needed (actual data received)
       if (sStExtensions.mPropTestRspLen) {
@@ -4571,7 +4448,7 @@ void NfcStExtensions::StVsCallback(tNFC_VS_EVT event, uint16_t data_len,
             (uint8_t*)GKI_os_malloc(sStExtensions.mPropTestRspLen);
         if (sStExtensions.mPropTestRspPtr == NULL) {
           LOG(ERROR) << StringPrintf(
-              "%s: Could not allocate memory for sStExtensions.mPropTestRspPtr",
+              "%s; Could not allocate memory for sStExtensions.mPropTestRspPtr",
               fn);
           return;
         }
@@ -4582,11 +4459,16 @@ void NfcStExtensions::StVsCallback(tNFC_VS_EVT event, uint16_t data_len,
       sStExtensions.mPropTestRspLen = 0;
     }
 
+    LOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; mPropTestRspLen = %d, notifying mVsCallbackEvent",
+                        fn, sStExtensions.mPropTestRspLen);
+
     sStExtensions.mVsCallbackEvent.start();
     sStExtensions.mVsCallbackEvent.notifyOne();
     sStExtensions.mVsCallbackEvent.end();
     return;
   }
+
   // PROP_LOG_MODE
   if (p_data[1] == 0x02 && p_data[4] == 0x20) {
     NfcStExtensions::getInstance().StHandleVsLogData(data_len, p_data);
@@ -4598,11 +4480,19 @@ void NfcStExtensions::StVsCallback(tNFC_VS_EVT event, uint16_t data_len,
     NfcStExtensions::getInstance().StHandleVsRawAuthNtf(data_len, p_data);
     return;
   }
-  // other subcodes are not supported
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s : 1:3:4 = 0x%02X:0x%02X:0x%02X", fn, p_data[1], p_data[3], p_data[4]);
 }
 
+/*******************************************************************************
+**
+** Function:        StRestartCallback
+**
+** Description:     Receive execution environment-related events from stack.
+**                  event: Event code.
+**                  eventData: Event data.
+**
+** Returns:         None
+**
+*******************************************************************************/
 void NfcStExtensions::StRestartCallback() {
   LOG(INFO) << StringPrintf("%s - Restart resquested", __func__);
   NfcStExtensions::getInstance().notifyRestart();
@@ -4622,7 +4512,7 @@ void NfcStExtensions::StAidTriggerActionCallback(tNFA_EE_ACTION& action) {
   bool doSendUpper = false;
 
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: h=0x%X; trigger = 0x%X", fn, action.ee_handle, action.trigger);
+      "%s; h=0x%X; trigger = 0x%X", fn, action.ee_handle, action.trigger);
 
   // Do we need to send the payload to upper layer?
   {
@@ -4683,7 +4573,7 @@ void NfcStExtensions::StAidTriggerActionCallback(tNFA_EE_ACTION& action) {
       JNIEnv* e = NULL;
       ScopedAttach attach(mNativeData->vm, &e);
       if (e == NULL) {
-        LOG(ERROR) << StringPrintf("jni env is null");
+        LOG(ERROR) << StringPrintf("%s; jni env is null", __func__);
         return;
       }
       ScopedLocalRef<jbyteArray> ntfData(e, e->NewByteArray(buflen));
@@ -4714,7 +4604,7 @@ void NfcStExtensions::StLogManagerEnable(bool enable) {
     mSendVsLogDataToUpper = enable;
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", fn);
 }
 
 /*******************************************************************************
@@ -4735,7 +4625,7 @@ void NfcStExtensions::StActionNtfEnable(bool enable) {
     mSendNfceeActionNtfToUpper = enable;
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", fn);
 }
 
 /*******************************************************************************
@@ -4756,7 +4646,7 @@ void NfcStExtensions::StIntfActivatedNtfEnable(bool enable) {
     mSendIntfActivatedNtfToUpper = enable;
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", fn);
 }
 
 void NfcStExtensions::notifyIntfActivatedEvent(uint8_t len, uint8_t* pdata) {
@@ -4773,9 +4663,9 @@ void NfcStExtensions::notifyIntfActivatedEvent(uint8_t len, uint8_t* pdata) {
     ScopedAttach attach(mNativeData->vm, &e);
     LOG_IF(INFO, nfc_debug_enabled)
         << fn
-        << StringPrintf(": send %db: %02x%02x...", len, pdata[0], pdata[1]);
+        << StringPrintf("; send %db: %02x%02x...", len, pdata[0], pdata[1]);
     if (e == NULL) {
-      LOG(ERROR) << StringPrintf("jni env is null");
+      LOG(ERROR) << StringPrintf("%s; jni env is null", __func__);
       return;
     }
     ScopedLocalRef<jbyteArray> ntfData(e, e->NewByteArray(len));
@@ -4831,8 +4721,8 @@ bool NfcStExtensions::rotateRfParameters(bool reset) {
   uint8_t param[1];
   tNFA_STATUS status;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "Enter :%s  r:%d cur:%d", __func__, reset, sRfDynParamSet);
+  DLOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s;  r:%d cur:%d", __func__, reset, sRfDynParamSet);
 
   // Set the new RF set to use
   if (reset) {
@@ -4867,7 +4757,7 @@ bool NfcStExtensions::rotateRfParameters(bool reset) {
           .needStopDiscoveryBeforerotateRfParameters()) {
     NfcStExtensions::getInstance().waitForFieldOffOrTimeout();
     DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: stop discovery reconfiguring", __func__);
+        << StringPrintf("%s; stop discovery reconfiguring", __func__);
     // Stop RF discovery
     wasStopped = true;
     android::startRfDiscovery(false);
@@ -4885,7 +4775,7 @@ bool NfcStExtensions::rotateRfParameters(bool reset) {
   if (wasStopped) {
     // start discovery
     DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: reconfigured start discovery", __func__);
+        << StringPrintf("%s; reconfigured start discovery", __func__);
     android::startRfDiscovery(true);
   }
   gIsReconfiguringDiscovery.end();
@@ -4894,7 +4784,7 @@ end:
   if (NfcStExtensions::getInstance().mDynFwState == DYN_ST_T1_IN_ROTATION)
     NfcStExtensions::getInstance().mDynFwState = DYN_ST_T1_ROTATION_DONE;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", __func__);
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", __func__);
 
   return (status == NFA_STATUS_OK);
 }
@@ -4933,7 +4823,7 @@ bool NfcStExtensions::needStopDiscoveryBeforerotateRfParameters() {
   }
 
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: TER21113 : %s", __func__, ter21113 ? "true" : "false");
+      "%s; TER21113 : %s", __func__, ter21113 ? "true" : "false");
   return !ter21113;  // need to stop discovery if TER is not included.
 }
 
@@ -4966,8 +4856,6 @@ bool NfcStExtensions::needMatchSwForNfceeActionNtf() {
     ter22444 = true;
   }
 
-  // DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-  //     "%s: TER22444 : %s", __func__, ter22444 ? "true" : "false");
   return !ter22444;  // need to match if TER is not included.
 }
 
@@ -4985,14 +4873,14 @@ bool NfcStExtensions::sendRawRfCmd(int cmdId, bool enable) {
   bool wasStopped = false;
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s(enter) - cmdId: 0x%02X, enable:%d", __func__, cmdId, enable);
+  DLOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; cmdId: 0x%02X, enable:%d", __func__, cmdId, enable);
 
   gIsReconfiguringDiscovery.start();
   if (android::isDiscoveryStarted()) {
     // Stop RF Discovery if we were polling
     DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: stop discovery reconfiguring", __func__);
+        << StringPrintf("%s; stop discovery reconfiguring", __func__);
     android::startRfDiscovery(false);
     wasStopped = true;
   }
@@ -5011,7 +4899,7 @@ bool NfcStExtensions::sendRawRfCmd(int cmdId, bool enable) {
         NFA_SendVsCommand(OID_ST_VS_CMD, 2, rawRfCmd, nfaVsCbActionRequest);
     if (nfaStat != NFA_STATUS_OK) {
       LOG(ERROR) << StringPrintf(
-          "%s: NFA_SendVsCommand() call failed; error=0x%X", __func__, nfaStat);
+          "%s; NFA_SendVsCommand() call failed; error=0x%X", __func__, nfaStat);
     } else {
       mVsActionRequestEvent.wait();
       // check status returned by the CLF
@@ -5037,7 +4925,7 @@ bool NfcStExtensions::sendRawRfCmd(int cmdId, bool enable) {
           SyncEventGuard guard(mNfaConfigEvent);
           uint8_t param[1] = {0x00};
 
-          if (enable) param[0] = 0x1E;  // 30ms to be fine tuned
+          if (enable) param[0] = 0x32;  // 50ms, can be fine tuned
 
           nfaStat = NFA_SetConfig(NCI_PARAM_ID_PROP_POLL_TX_TICK_INTERVAL,
                                   sizeof(param), &param[0]);
@@ -5056,12 +4944,12 @@ bool NfcStExtensions::sendRawRfCmd(int cmdId, bool enable) {
   if (wasStopped) {
     // start discovery
     DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: reconfigured start discovery", __func__);
+        << StringPrintf("%s; reconfigured start discovery", __func__);
     android::startRfDiscovery(true);
   }
   gIsReconfiguringDiscovery.end();
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s(exit)", __func__);
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", __func__);
 
   return (nfaStat == NFA_STATUS_OK);
 }
@@ -5077,11 +4965,23 @@ bool NfcStExtensions::sendRawRfCmd(int cmdId, bool enable) {
 void NfcStExtensions::StHandleVsRawAuthNtf(uint16_t data_len, uint8_t* p_data) {
   JNIEnv* e = NULL;
   ScopedAttach attach(sStExtensions.mNativeData->vm, &e);
+
+  LOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s : data_len=  0x%04X ", __func__, data_len);
+
   e->CallVoidMethod(sStExtensions.mNativeData->manager,
                     android::gCachedNfcManagerNotifyRawAuthStatus,
                     (jint)(int)p_data[5]);
 }
 
+/*******************************************************************************
+**
+** Function:        sendRawDeAuthNtf
+**
+** Description:     H.ndle Vendor-specific raw mode auth notif
+** Returns:         None
+**
+*******************************************************************************/
 void NfcStExtensions::sendRawDeAuthNtf(void) {
   // no cb in that case from the CLF, add fake here
   uint8_t fake_ntf[] = {0x6f, 0x02, 0x03, 0x00, 0x17, 0x00};
@@ -5089,6 +4989,14 @@ void NfcStExtensions::sendRawDeAuthNtf(void) {
                                                       fake_ntf);
 }
 
+/*******************************************************************************
+**
+** Function:        getExtRawMode
+**
+** Description:     H.ndle Vendor-specific raw mode auth notif
+** Returns:         None
+**
+*******************************************************************************/
 bool NfcStExtensions::getExtRawMode() { return mIsExtRawMode; }
 
 /*******************************************************************************
@@ -5107,11 +5015,437 @@ void NfcStExtensions::StHandleDetectionFOD(uint8_t FodReason) {
     return;
   }
 
+  LOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; FodReason: 0x%02X", __func__, FodReason);
+
   e->CallVoidMethod(mNativeData->manager,
                     android::gCachedNfcManagerNotifyDetectionFOD,
                     (int)FodReason);
   if (e->ExceptionCheck()) {
     e->ExceptionClear();
-    LOG(ERROR) << StringPrintf("fail notify");
+    LOG(ERROR) << StringPrintf("%s; fail notify", __func__);
   }
+}
+
+/*******************************************************************************
+ **
+ ** Function:        stPollingLoopSpyManagerEnable
+ **
+ ** Description:    Enable collection of POS polling loop data
+ **
+ ** Returns:         void
+ **
+ *******************************************************************************/
+void NfcStExtensions::stPollingLoopSpyManagerEnable(bool enable) {
+  static const char fn[] = "stPollingLoopSpyManagerEnable";
+  bool isUpdated = false;
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", fn);
+
+  {
+    SyncEventGuard guard(mVsLogDataEvent);
+    if (mCollectReaderPollingLoopData != enable) {
+      isUpdated = true;
+      mCollectReaderPollingLoopData = enable;
+    }
+  }
+
+  if (isUpdated) {
+    // Update observer mode
+    setObserverMode(enable);
+
+    /* start or stop the worker thread */
+    if (enable) {
+      mRPLSync.start();
+      mRPLLastFieldOnTs = 0;
+      mRPLLastFieldOffTs = 0;
+      mRPLLastDiscoStopTs = 0;
+      mRPLUnregistering = false;
+      mRPLString = (char*)malloc(RPL_STR_MAXLEN);
+      if (mRPLString == NULL) {
+        LOG(ERROR) << StringPrintf("%s; Failed to allocate memory", __func__);
+        abort();
+      }
+      mRPLStringIndex = 0;
+      mRPLNbEvents = 0;
+      mRPLLastEventTs = 0;
+
+      int ret = pthread_create(&mRPLThread, NULL,
+                               (THREADFUNCPTR)&NfcStExtensions::RPLWorker,
+                               (void*)this);
+      if (ret != 0) {
+        LOG(ERROR) << StringPrintf("%s; Failed to create worker thread",
+                                   __func__);
+        abort();
+      }
+      mRPLSync.end();
+    } else {
+      void* rv;
+      mRPLSync.start();
+      mRPLUnregistering = true;
+      mRPLSync.notifyOne();
+      mRPLSync.end();
+      int ret = pthread_join(mRPLThread, &rv);
+      if (ret != 0) {
+        LOG(ERROR) << StringPrintf("%s; Failed to stop worker thread",
+                                   __func__);
+      }
+    }
+  }
+
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", fn);
+}
+
+/*******************************************************************************
+ **
+ ** Function:        RPLWorker
+ **
+ ** Description:    Task of the worker for ReaderPollingLoop feature.
+ **
+ ** Returns:         void
+ **
+ *******************************************************************************/
+void* NfcStExtensions::RPLWorker(NfcStExtensions* inst) {
+  struct timespec expire = {.tv_sec = 0, .tv_nsec = 0};
+  struct timespec now;
+  bool expired;
+  enum {
+    RPL_THR_INITIAL,  // before first field ON, no expiry to waiting.
+    RPL_THR_100ms,    // got one field ON, collect events for 100ms.
+    RPL_THR_TRANS,    // wait for field off over 4 seconds to reenable observer
+  } state = RPL_THR_INITIAL;
+
+  inst->mRPLSync.start();
+  do {
+    if (expire.tv_sec == 0) {
+      // Wait without limit
+      inst->mRPLSync.wait();
+      expired = false;
+    } else {
+      long msToWait;
+
+      if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
+        LOG(ERROR) << StringPrintf("%s; fail get time; errno=0x%X", __func__,
+                                   errno);
+      } else {
+        // Compute delay between now and expire
+        msToWait = (expire.tv_sec - now.tv_sec) * 1000;
+        msToWait += (expire.tv_nsec - now.tv_nsec) / 1000000;
+        if (msToWait <= 0) {
+          expired = true;
+        } else {
+          expired = !inst->mRPLSync.wait(msToWait);
+        }
+      }
+    }
+
+    if (inst->mRPLUnregistering) {
+      DLOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s; Unregistering, exit", __func__);
+      break;
+    }
+
+    switch (state) {
+      case RPL_THR_INITIAL:
+        if (inst->mRPLLastFieldOnTs > inst->mRPLLastDiscoStopTs) {
+          // We got a FIELD ON since last discovery restart, start 100ms timer.
+          if (clock_gettime(CLOCK_MONOTONIC, &expire) == -1) {
+            LOG(ERROR) << StringPrintf("%s; fail get time; errno=0x%X",
+                                       __func__, errno);
+          }
+          expire.tv_sec += RPL_OBSERVER_DURATION_MS / 1000;
+          long ns =
+              expire.tv_nsec + ((RPL_OBSERVER_DURATION_MS % 1000) * 1000000);
+          if (ns > 1000000000) {
+            expire.tv_sec++;
+            expire.tv_nsec = ns - 1000000000;
+          } else {
+            expire.tv_nsec = ns;
+          }
+          state = RPL_THR_100ms;
+          DLOG_IF(INFO, nfc_debug_enabled)
+              << StringPrintf("%s; INITIAL==>100ms", __func__);
+        } else {
+          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+              "%s; stay in INITIAL (discovery stopped?)", __func__);
+        }
+        break;
+      case RPL_THR_100ms:
+        if (!expired) {
+          if (inst->mRPLLastDiscoStopTs > inst->mRPLLastFieldOnTs) {
+            DLOG_IF(INFO, nfc_debug_enabled)
+                << StringPrintf("%s; 100ms==>INITIAL (disc stopped)", __func__);
+            state = RPL_THR_INITIAL;
+            memset(&expire, 0, sizeof(expire));
+          }
+          break;
+        }
+        // 100ms timer expired
+        if (inst->mRPLNbEvents == 0) {
+          DLOG_IF(INFO, nfc_debug_enabled)
+              << StringPrintf("%s; 100ms==>INITIAL (no evts)", __func__);
+          state = RPL_THR_INITIAL;
+          memset(&expire, 0, sizeof(expire));
+        } else {
+          inst->mRPLState = RPL_ST_TRANSACT;
+          state = RPL_THR_TRANS;
+          DLOG_IF(INFO, nfc_debug_enabled)
+              << StringPrintf("%s; 100ms==>TRANS", __func__);
+          inst->mRPLSync.end();
+
+          inst->setObserverMode(false);
+
+          // send the string to service
+          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+              "%s: Sending %d events (%d chars) to service", __func__,
+              inst->mRPLNbEvents, inst->mRPLStringIndex);
+
+          //
+          {
+            JNIEnv* e = NULL;
+            ScopedAttach attach(inst->mNativeData->vm, &e);
+            CHECK(e);
+
+            ScopedLocalRef<jobject> fpJavaString(
+                e, e->NewStringUTF(inst->mRPLString));
+            e->CallVoidMethod(inst->mNativeData->manager,
+                              android::gCachedNfcManagerNotifyPollingLoopData,
+                              fpJavaString.get());
+          }
+
+          // reset string state
+          inst->mRPLStringIndex = 0;
+          inst->mRPLNbEvents = 0;
+
+          // start the timer
+          inst->mRPLSync.start();
+          if (clock_gettime(CLOCK_MONOTONIC, &expire) == -1) {
+            LOG(ERROR) << StringPrintf("%s; fail get time; errno=0x%X",
+                                       __func__, errno);
+          }
+          expire.tv_sec += RPL_OBSERVER_RESET_S;
+        }
+        break;
+      case RPL_THR_TRANS:
+        if (!expired) {
+          // we were notified for some event, reset the timer
+          if (clock_gettime(CLOCK_MONOTONIC, &expire) == -1) {
+            LOG(ERROR) << StringPrintf("%s; fail get time; errno=0x%X",
+                                       __func__, errno);
+          }
+          expire.tv_sec += RPL_OBSERVER_RESET_S;
+        } else {
+          inst->mRPLState = RPL_ST_OBSERVER;
+          state = RPL_THR_INITIAL;
+          memset(&expire, 0, sizeof(expire));
+          DLOG_IF(INFO, nfc_debug_enabled)
+              << StringPrintf("%s; TRANS==>INITIAL", __func__);
+          inst->mRPLSync.end();
+
+          // start Observer mode
+          inst->setObserverMode(true);
+
+          inst->mRPLSync.start();
+        }
+        break;
+    }
+
+  } while (inst->mRPLUnregistering != true);
+  inst->mRPLSync.end();
+  return NULL;
+}
+
+/*******************************************************************************
+ **
+ ** Function:        StHandlePollingLoopData
+ **
+ ** Description:
+ **
+ ** Returns:         void
+ **
+ *******************************************************************************/
+void NfcStExtensions::StHandlePollingLoopData(uint8_t format, uint16_t data_len,
+                                              uint8_t* p_data, bool last) {
+  static const char fn[] = "NfcStExtensions::StHandlePollingLoopData";
+
+  if ((format & 0x1) == 0 || data_len < 6) {
+    LOG_IF(INFO, nfc_debug_enabled) << fn << ": TLV without timestamp";
+    return;
+  }
+
+  uint32_t receivedFwts = (p_data[data_len - 4] << 24) |
+                          (p_data[data_len - 3] << 16) |
+                          (p_data[data_len - 2] << 8) | p_data[data_len - 1];
+  uint8_t t = p_data[0];
+
+  char type = '?';
+  uint8_t gain = 0xFF;
+  uint8_t errstatus = 0xFF;
+
+  if ((t != T_fieldOff) && (t != T_fieldOn) && (t != T_fieldSenseStopped) &&
+      (t != T_CERxError) && (t != T_CERx)) {
+    // We only care for these events
+    return;
+  }
+
+  mRPLSync.start();
+  switch (t) {
+    case T_fieldOn:
+      type = 'O';
+      mRPLLastFieldOnTs = receivedFwts;
+      mRPLSync.notifyOne();
+      break;
+    case T_fieldOff:
+      type = 'o';
+      mRPLLastFieldOffTs = receivedFwts;
+      mRPLSync.notifyOne();
+      break;
+    case T_fieldSenseStopped:
+      mRPLLastDiscoStopTs = receivedFwts;
+      mRPLSync.notifyOne();
+      break;
+  }
+
+  // if we are not in observer mode, notify all activity update.
+  if (mRPLState != RPL_ST_OBSERVER) {
+    mRPLLastEventTs = receivedFwts;
+    mRPLSync.notifyOne();
+    mRPLSync.end();
+    return;
+  }
+
+  switch (t) {
+    case T_CERxError:
+      switch (p_data[2] & 0xF) {
+        case 0x1:
+          type = 'A';
+          break;
+        case 0x7:
+          type = 'B';
+          break;
+        case 0x9:
+          type = 'F';
+          break;
+      }
+      if ((format & 0x30) == 0x20) {
+        // ST54J
+        gain = (p_data[3] & 0xF0) >> 4;
+        errstatus = p_data[5];
+      } else {
+        // ST21
+        gain = p_data[3];
+        errstatus = p_data[4];
+      }
+      break;
+    case T_CERx:
+      switch (p_data[2] & 0xF) {
+        case 0x1:
+          type = 'A';
+          break;
+        case 0x7:
+          type = 'B';
+          break;
+        case 0x9:
+          type = 'F';
+          break;
+      }
+      if ((format & 0x30) == 0x20) {
+        // ST54J
+        gain = (p_data[3] & 0xF0) >> 4;
+        errstatus = 0;
+      } else {
+        // ST21
+        gain = p_data[3];
+        errstatus = 0;
+      }
+      break;
+  }
+
+  if (type != '?') {
+    StRPLAddOneEventLocked(type, gain, receivedFwts);
+  }
+
+  mRPLSync.end();
+}
+
+/*******************************************************************************
+ **
+ ** Function:        FwTsDiffToUs
+ **
+ ** Description:
+ **
+ ** Returns:         void
+ **
+ *******************************************************************************/
+int NfcStExtensions::FwTsDiffToUs(uint32_t fwtsstart, uint32_t fwtsend) {
+  uint32_t diff;
+  if (fwtsstart <= fwtsend) {
+    diff = fwtsend - fwtsstart;
+  } else {
+    // overflow
+    diff = (0xFFFFFFFF - fwtsstart) + fwtsend;
+  }
+  return (int)((float)diff * 4.57);
+}
+
+/*******************************************************************************
+ **
+ ** Function:        StRPLAddOneEventLocked
+ **
+ ** Description:
+ **
+ ** Returns:         void
+ **
+ *******************************************************************************/
+void NfcStExtensions::StRPLAddOneEventLocked(char type, uint8_t gain,
+                                             uint32_t ts) {
+  int added = 0;
+
+  if ((mRPLNbEvents >= RPL_MAX_EVENTS) || (mRPLString == NULL)) return;
+
+  if ((mRPLNbEvents == 0) && ((type == 'o') || (type == 'O'))) {
+    // We skip all initial field on/off without any CE Rx
+    return;
+  }
+
+  if (mRPLNbEvents == 0) {
+    // add back the last field ON now
+    snprintf(mRPLString, RPL_STR_MAXLEN, "O");
+    mRPLLastEventTs = mRPLLastFieldOnTs;
+    mRPLStringIndex = 1;
+    mRPLNbEvents = 1;
+  }
+
+  // Add ";ts"
+  added =
+      snprintf(mRPLString + mRPLStringIndex, RPL_STR_MAXLEN - mRPLStringIndex,
+               ";%d", FwTsDiffToUs(mRPLLastEventTs, ts));
+  if (added < 0) {
+    LOG(ERROR) << StringPrintf("%s;%d: failed to write (i:%d)", __func__,
+                               __LINE__, mRPLStringIndex);
+    return;
+  }
+  mRPLStringIndex += added;
+  mRPLLastEventTs = ts;
+
+  // add ";evt"
+  added = snprintf(mRPLString + mRPLStringIndex,
+                   RPL_STR_MAXLEN - mRPLStringIndex, ";%c", type);
+  if (added < 0) {
+    LOG(ERROR) << StringPrintf("%s;%d: failed to write (i:%d)", __func__,
+                               __LINE__, mRPLStringIndex);
+    return;
+  }
+  mRPLStringIndex += added;
+  if (gain != 0xFF) {
+    added = snprintf(mRPLString + mRPLStringIndex,
+                     RPL_STR_MAXLEN - mRPLStringIndex, "%02hhd", gain);
+    if (added < 0) {
+      LOG(ERROR) << StringPrintf("%s;%d: failed to write (i:%d)", __func__,
+                                 __LINE__, mRPLStringIndex);
+      return;
+    }
+    mRPLStringIndex += added;
+  }
+
+  mRPLNbEvents++;
 }

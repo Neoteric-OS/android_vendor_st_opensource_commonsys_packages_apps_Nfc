@@ -17,6 +17,7 @@
 package com.android.nfcstm.snep;
 
 import android.nfc.FormatException;
+import android.os.SystemProperties;
 import android.util.Log;
 import com.android.nfcstm.DeviceHost.LlcpSocket;
 import com.android.nfcstm.NfcService;
@@ -30,7 +31,8 @@ import java.util.Arrays;
 
 public class SnepMessenger {
     private static final String TAG = "SnepMessager";
-    private static final boolean DBG = false;
+    private static final boolean DBG =
+            SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
     private static final int HEADER_LENGTH = 6;
     final LlcpSocket mSocket;
     final int mFragmentLength;

@@ -24,7 +24,6 @@
 #include <nativehelper/ScopedLocalRef.h>
 
 #include "StRoutingManager.h"
-#include "StNfcDtaJni.h"
 
 using android::base::StringPrintf;
 
@@ -42,18 +41,14 @@ extern bool nfc_debug_enabled;
 **
 *******************************************************************************/
 jint JNI_OnLoad(JavaVM* jvm, void*) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", __func__);
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
   JNIEnv* e = NULL;
-
-  LOG(INFO) << StringPrintf("NFC Service: loading nci JNI");
 
   // Check JNI version
   if (jvm->GetEnv((void**)&e, JNI_VERSION_1_6)) return JNI_ERR;
 
-  if (android::register_com_android_nfc_stNativeNfcManager(e) == -1){
-    LOG(INFO) << StringPrintf("NFC Service: if loading nci JNI");
+  if (android::register_com_android_nfc_stNativeNfcManager(e) == -1)
     return JNI_ERR;
-  }
   if (android::register_com_android_nfc_NativeLlcpServiceSocket(e) == -1)
     return JNI_ERR;
   if (android::register_com_android_nfc_NativeLlcpSocket(e) == -1)
@@ -67,12 +62,9 @@ jint JNI_OnLoad(JavaVM* jvm, void*) {
     return JNI_ERR;
   if (android::register_com_android_nfc_NativeNfcStExtensions(e) == -1)
     return JNI_ERR;
-  if (android::register_com_android_nfc_NativeNfcStDtaExtensions(e) == -1)
-    return JNI_ERR;
   if (StRoutingManager::getInstance().registerJniFunctions(e) == -1)
     return JNI_ERR;
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", __func__);
-  LOG(INFO) << StringPrintf("NFC Service: exit nci JNI");
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", __func__);
   return JNI_VERSION_1_6;
 }
 
@@ -90,20 +82,20 @@ namespace android {
 int nfc_jni_cache_object(JNIEnv* e, const char* className, jobject* cachedObj) {
   ScopedLocalRef<jclass> cls(e, e->FindClass(className));
   if (cls.get() == NULL) {
-    LOG(ERROR) << StringPrintf("%s: find class error", __func__);
+    LOG(ERROR) << StringPrintf("%s; find class error", __func__);
     return -1;
   }
 
   jmethodID ctor = e->GetMethodID(cls.get(), "<init>", "()V");
   ScopedLocalRef<jobject> obj(e, e->NewObject(cls.get(), ctor));
   if (obj.get() == NULL) {
-    LOG(ERROR) << StringPrintf("%s: create object error", __func__);
+    LOG(ERROR) << StringPrintf("%s; create object error", __func__);
     return -1;
   }
 
   *cachedObj = e->NewGlobalRef(obj.get());
   if (*cachedObj == NULL) {
-    LOG(ERROR) << StringPrintf("%s: global ref error", __func__);
+    LOG(ERROR) << StringPrintf("%s; global ref error", __func__);
     return -1;
   }
   return 0;
@@ -157,20 +149,20 @@ int nfc_jni_cache_object_local(JNIEnv* e, const char* className,
                                jobject* cachedObj) {
   ScopedLocalRef<jclass> cls(e, e->FindClass(className));
   if (cls.get() == NULL) {
-    LOG(ERROR) << StringPrintf("%s: find class error", __func__);
+    LOG(ERROR) << StringPrintf("%s; find class error", __func__);
     return -1;
   }
 
   jmethodID ctor = e->GetMethodID(cls.get(), "<init>", "()V");
   jobject obj = e->NewObject(cls.get(), ctor);
   if (obj == NULL) {
-    LOG(ERROR) << StringPrintf("%s: create object error", __func__);
+    LOG(ERROR) << StringPrintf("%s; create object error", __func__);
     return -1;
   }
 
   *cachedObj = obj;
   if (*cachedObj == NULL) {
-    LOG(ERROR) << StringPrintf("%s: global ref error", __func__);
+    LOG(ERROR) << StringPrintf("%s; global ref error", __func__);
     return -1;
   }
   return 0;

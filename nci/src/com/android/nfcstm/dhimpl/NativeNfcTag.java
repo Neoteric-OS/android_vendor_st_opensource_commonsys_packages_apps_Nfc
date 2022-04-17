@@ -47,6 +47,8 @@ public class NativeNfcTag implements TagEndpoint {
     private byte[][] mTechPollBytes;
     private byte[][] mTechActBytes;
     private byte[] mUid;
+    // Based on flag send T2T tag classification request
+    private boolean mClassifyT2T = true;
 
     // mConnectedHandle stores the *real* libnfc handle
     // that we're connected to.
@@ -285,6 +287,7 @@ public class NativeNfcTag implements TagEndpoint {
 
         mConnectedTechIndex = -1;
         mConnectedHandle = -1;
+        mClassifyT2T = true;
         return result;
     }
 
@@ -348,7 +351,13 @@ public class NativeNfcTag implements TagEndpoint {
 
     @Override
     public synchronized boolean checkNdef(int[] ndefinfo) {
-        return checkNdefWithStatus(ndefinfo) == 0;
+        boolean status = false;
+        if (hasTech(TagTechnology.NDEF)) {
+            status = true;
+        } else {
+            status = checkNdefWithStatus(ndefinfo) == 0;
+        }
+        return status;
     }
 
     private native byte[] doRead();
@@ -766,8 +775,21 @@ public class NativeNfcTag implements TagEndpoint {
 
                     case TagTechnology.MIFARE_ULTRALIGHT:
                         {
-                            boolean isUlc = isUltralightC();
-                            extras.putBoolean(MifareUltralight.EXTRA_IS_UL_C, isUlc);
+                            if (mClassifyT2T) {
+                                boolean isUlc = isUltralightC();
+                                extras.putBoolean(MifareUltralight.EXTRA_IS_UL_C, isUlc);
+                            }
+                            break;
+                        }
+
+                    case TagTechnology.MIFARE_CLASSIC:
+                        {
+                            byte[] actBytes = mTechActBytes[i];
+                            if ((actBytes != null) && (actBytes.length > 0)) {
+                                extras.putShort(
+                                        NfcA.EXTRA_SAK, (short) (actBytes[0] & (short) 0xFF));
+                            }
+                            extras.putByteArray(NfcA.EXTRA_ATQA, mTechPollBytes[i]);
                             break;
                         }
 
@@ -888,5 +910,50 @@ public class NativeNfcTag implements TagEndpoint {
         }
 
         return ndefMsg;
+    }
+
+    @Override
+    public void findNdef() {
+        int[] technologies = getTechList();
+        int[] handles = mTechHandles;
+        int currHandle = 0;
+        mClassifyT2T = !hasTech(TagTechnology.MIFARE_ULTRALIGHT);
+
+        for (int techIndex = 0; techIndex < technologies.length; techIndex++) {
+            if (currHandle != handles[techIndex]) {
+                currHandle = handles[techIndex];
+                int status = connectWithStatus(technologies[techIndex]);
+                if (status != 0) {
+                    Log.d(TAG, "Connect Failed - status = " + status);
+                    if (status == STATUS_CODE_TARGET_LOST) {
+                        break;
+                    }
+                    continue; // try next handle
+                }
+
+                int[] ndefinfo = new int[2];
+                status = checkNdefWithStatus(ndefinfo);
+                if (status != 0) {
+                    Log.d(TAG, "findNdef: Check NDEF Failed - status = " + status);
+                    if (status == STATUS_CODE_TARGET_LOST) {
+                        break;
+                    }
+                    continue; // try next handle
+                } else {
+                    int supportedNdefLength = ndefinfo[0];
+                    int cardState = ndefinfo[1];
+                    addNdefTechnology(
+                            null,
+                            getConnectedHandle(),
+                            getConnectedLibNfcType(),
+                            getConnectedTechnology(),
+                            supportedNdefLength,
+                            cardState);
+                    break;
+                }
+            } else {
+                Log.d(TAG, "findNdef: Duplicate techIndex = " + techIndex);
+            }
+        }
     }
 }

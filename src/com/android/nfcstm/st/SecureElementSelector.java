@@ -268,7 +268,7 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
         if (prevPresence == NfcSimStateObserver.SimEventListener.ABSENT) {
             // The SIM was N/A because of absent, now it is not absent anymore.
             // We set Available until it will be further refined.
-            mNativeNfcManager.NfceeDiscover();
+            mNativeNfcManager.nfceeDiscover();
             RefreshSeStatus(true);
         }
 
@@ -395,7 +395,7 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                 Log.d(TAG, "init() - persist.st_nfc_ignore_modem_sim1=1");
             }
 
-            mNativeNfcManager.NfceeDiscover();
+            mNativeNfcManager.nfceeDiscover();
             RefreshSeStatus(true);
 
             if (!st21HasSim2()) {
@@ -430,7 +430,6 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
     shortly */
     private void GetUiccAvailability(boolean skipactive) {
         int toskip = 0x00, toskipAlt = 0x00;
-        if (DBG) Log.d(TAG, "GetUiccAvailability() ");
         if (skipactive) {
             String seStr = mContentProviderUtil.getUserDesiredUiccString();
             if (seStr != null) {
@@ -451,9 +450,9 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                         TAG,
                         "GetUiccAvailability() - SeID = "
                                 + String.format("0x%02X", entry.getKey())
-                                + " Status = "
+                                + ", Status = "
                                 + entry.getValue()
-                                + " skip = "
+                                + ", skip = "
                                 + String.format("0x%02X", toskip));
 
                 if ((entry.getKey() != toskip)
@@ -493,15 +492,13 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
     }
 
     private boolean restorePreviousSe() {
-        Log.d(TAG, "restorePreviousSe() - Entry");
-
         boolean isActiveSeChanged = false;
         String DefaultSe;
         int DesiredeSE = 0;
         int DesiredUicc = 0;
         String UiccStr = mContentProviderUtil.getUserDesiredUiccString();
         String eSEStr = mContentProviderUtil.getUserDesiredeSEString();
-        Log.d(TAG, "restorePreviousSe() - UiccStr = " + UiccStr + " eSEStr= " + eSEStr);
+        Log.d(TAG, "restorePreviousSe() - UiccStr = " + UiccStr + ", eSEStr= " + eSEStr);
         if (UiccStr == null && eSEStr == null) {
             // isFirstTime = true;
             DefaultSe = SystemProperties.get("persist.st_nfc_defaut_se");
@@ -548,7 +545,7 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                 TAG,
                 "restorePreviousSe() - DesiredUicc = "
                         + String.format("0x%02X", DesiredUicc)
-                        + "- DesiredeSE = "
+                        + ", DesiredeSE = "
                         + String.format("0x%02X", DesiredeSE));
         boolean ret = false;
         if ((DesiredUicc != 0x0)
@@ -619,7 +616,7 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                     }
 
                     if (errors > 0) { // this may happen if SIM card was ejected when CE was active.
-                        mNativeNfcManager.NfceeDiscover();
+                        mNativeNfcManager.nfceeDiscover();
                         RefreshSeStatus(true);
                     }
                 } else if (ActSe != SeID) {
@@ -639,7 +636,7 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                             if (false
                                     == mStExtensions.EnableSE(
                                             ActSe, false)) { // Disable the activated SE
-                                mNativeNfcManager.NfceeDiscover();
+                                mNativeNfcManager.nfceeDiscover();
                                 RefreshSeStatus(true);
                             }
                         }
@@ -657,7 +654,7 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                             "onActiveUiccChanged() - reactivate request for same EE, force "
                                     + "discover "
                                     + Integer.toHexString(SeID));
-                    mNativeNfcManager.NfceeDiscover();
+                    mNativeNfcManager.nfceeDiscover();
                     mStExtensions.EnableSE(SeID, true);
                 }
                 ActSeNew = getActiveUiccValue();

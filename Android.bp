@@ -32,7 +32,6 @@ android_app {
 
     jni_libs: [
         "libstnfc_nci_jni",
-        "libnfc_st_dta_jni",
     ],
 
     libs: [
@@ -43,8 +42,10 @@ android_app {
 		"com.st.android.nfc_extensions"
 	],
 
-    static_libs: ["androidx.appcompat_appcompat",
-                 ],
+    static_libs: [
+        "androidx.appcompat_appcompat",
+        "com.google.android.material_material",
+    ],
 
     optimize: {
         enabled: false,

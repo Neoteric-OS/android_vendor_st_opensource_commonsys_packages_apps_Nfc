@@ -96,8 +96,6 @@ public interface DeviceHost {
                 int abTechRoute,
                 int scRoute);
 
-        public void onESEUnrecoverableError();
-
         public void onDetectionFOD(int FodReason);
 
         public void onStLogData(int logtype, byte[][] data);
@@ -107,6 +105,8 @@ public interface DeviceHost {
         public void onRawAuthReceived(boolean status);
 
         public void onIntfActivatedNtfReceived(byte[] data);
+
+        public void onPollingLoopData(String data);
     }
 
     public interface TagEndpoint {
@@ -156,6 +156,12 @@ public interface DeviceHost {
         int getConnectedTechnology();
 
         void endPreviousPresenceCheck();
+        /**
+         * Find Ndef only As per NFC forum test specification ndef write test expects only ndef
+         * detection followed by ndef write. System property nfc.dta.skipNdefRead added to skip
+         * default ndef read before tag dispatch. This system property is valid only in reader mode.
+         */
+        void findNdef();
     }
 
     public interface TagDisconnectedCallback {
@@ -331,6 +337,12 @@ public interface DeviceHost {
     public boolean setNfcSecure(boolean enable);
 
     public String getNfaStorageDir();
+
+    /** Get the committed listen mode routing configuration */
+    byte[] getRoutingTable();
+
+    /** Get the Max Routing Table size from cache */
+    int getMaxRoutingTableSize();
 
     /** Start or stop RF polling */
     void startStopPolling(boolean enable);

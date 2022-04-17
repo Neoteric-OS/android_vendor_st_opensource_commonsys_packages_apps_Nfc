@@ -17,6 +17,7 @@ package com.android.nfcstm.handover;
 
 import android.nfc.FormatException;
 import android.nfc.NdefMessage;
+import android.os.SystemProperties;
 import android.util.Log;
 import com.android.nfcstm.DeviceHost.LlcpSocket;
 import com.android.nfcstm.LlcpException;
@@ -28,7 +29,8 @@ import java.util.Arrays;
 public final class HandoverClient {
     private static final String TAG = "HandoverClient";
     private static final int MIU = 128;
-    private static final boolean DBG = false;
+    private static final boolean DBG =
+            SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
 
     private static final int DISCONNECTED = 0;
     private static final int CONNECTING = 1;

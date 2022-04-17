@@ -415,6 +415,12 @@ public class NativeNfcManager implements DeviceHost {
         doSetNfceePowerAndLinkCtrl(enable);
     }
 
+    @Override
+    public native byte[] getRoutingTable();
+
+    @Override
+    public native int getMaxRoutingTableSize();
+
     /** Notifies Ndef Message (TODO: rename into notifyTargetDiscovered) */
     private void notifyNdefMessageListeners(NativeNfcTag tag) {
         mListener.onRemoteEndpointDiscovered(tag);

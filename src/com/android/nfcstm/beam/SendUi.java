@@ -63,6 +63,7 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 import com.android.internal.policy.PhoneWindow;
+import com.android.internal.policy.SystemBarUtils;
 import com.android.nfcstm.R;
 
 /**
@@ -250,7 +251,7 @@ public class SendUi
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         0,
                         0,
-                        WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                         WindowManager.LayoutParams.FLAG_FULLSCREEN
                                 | hwAccelerationFlags
                                 | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
@@ -350,7 +351,7 @@ public class SendUi
         new ScreenshotTask().execute();
 
         final IntentFilter filter = new IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
-        mContext.registerReceiver(mReceiver, filter);
+        mContext.registerReceiver(mReceiver, filter, Context.RECEIVER_EXPORTED);
     }
 
     /** Show pre-send animation */
@@ -382,9 +383,7 @@ public class SendUi
         // Update display metrics
         mDisplay.getRealMetrics(mDisplayMetrics);
 
-        final int statusBarHeight =
-                mContext.getResources()
-                        .getDimensionPixelSize(com.android.internal.R.dimen.status_bar_height);
+        final int statusBarHeight = SystemBarUtils.getStatusBarHeight(mContext);
 
         mBlackLayer.setVisibility(View.GONE);
         mBlackLayer.setAlpha(0f);
@@ -610,18 +609,23 @@ public class SendUi
 
     /** Returns a screenshot of the current display contents. */
     Bitmap createScreenshot() {
+        boolean hasNavBar =
+                mContext.getResources()
+                        .getBoolean(com.android.internal.R.bool.config_showNavigationBar);
+        final int statusBarHeight = SystemBarUtils.getStatusBarHeight(mContext);
 
         // Temporary patch for Android 12.. Start
 
         //       boolean hasNavBar =
         //               mContext.getResources()
         //                      .getBoolean(com.android.internal.R.bool.config_showNavigationBar);
-        boolean hasNavBar = true;
+        //        boolean hasNavBar = true;
 
         // ..End
-        final int statusBarHeight =
-                mContext.getResources()
-                        .getDimensionPixelSize(com.android.internal.R.dimen.status_bar_height);
+        //        final int statusBarHeight =
+        //                mContext.getResources()
+        //
+        // .getDimensionPixelSize(com.android.internal.R.dimen.status_bar_height);
 
         // Navbar has different sizes, depending on orientation
         final int navBarHeight =
