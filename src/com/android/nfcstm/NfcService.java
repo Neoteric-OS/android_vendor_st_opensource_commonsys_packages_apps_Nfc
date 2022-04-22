@@ -478,6 +478,9 @@ public class NfcService implements DeviceHostListener {
     int mPollDelay;
     boolean mNotifyDispatchFailed;
 
+    // for recording the latest Tag object cookie
+    long mCookieUpToDate = 0;
+
     private NfcDispatcher mNfcDispatcher;
     private PowerManager mPowerManager;
     private KeyguardManager mKeyguard;
@@ -4782,6 +4785,23 @@ public class NfcService implements DeviceHostListener {
         public boolean getExtendedLengthApdusSupported() throws RemoteException {
             return mDeviceHost.getExtendedLengthApdusSupported();
         }
+
+        @Override
+        public void setTagUpToDate(long cookie) throws RemoteException {
+            if (DBG) Log.d(TAG, "Register Tag " + Long.toString(cookie) + " as the latest");
+            mCookieUpToDate = cookie;
+        }
+
+        @Override
+        public boolean isTagUpToDate(long cookie) throws RemoteException {
+            if (mCookieUpToDate == cookie) {
+                if (DBG) Log.d(TAG, "Tag " + Long.toString(cookie) + " is up to date");
+                return true;
+            }
+
+            if (DBG) Log.d(TAG, "Tag " + Long.toString(cookie) + " is out of date");
+            return false;
+        }
     }
 
     void _nfcEeClose(int callingPid, IBinder binder) throws IOException {
@@ -6656,8 +6676,8 @@ public class NfcService implements DeviceHostListener {
                 String reader = new String(readerByteArray, "UTF-8");
                 String[] installedPackages = new String[mNfcEventInstalledPackages.size()];
                 boolean[] nfcAccess =
-                        mSEService.isNFCEventAllowed(
-                                reader, aid, mNfcEventInstalledPackages.toArray(installedPackages));
+                        mSEService.isNfcEventAllowed(
+                                reader, aid, mNfcEventInstalledPackages.toArray(installedPackages),mUserId);
                 if (nfcAccess == null) {
                     if (DBG2)
                         Log.d(
@@ -6700,7 +6720,7 @@ public class NfcService implements DeviceHostListener {
                     }
                 }
             } catch (RemoteException e) {
-                Log.e(TAG, "Error in isNFCEventAllowed() " + e);
+                Log.e(TAG, "Error in isNfcEventAllowed() " + e);
             } catch (UnsupportedEncodingException e) {
                 Log.e(TAG, "Incorrect format for Secure Element name" + e);
             }
@@ -6736,10 +6756,10 @@ public class NfcService implements DeviceHostListener {
             for (String reader : readers) {
                 try {
                     boolean[] accessList =
-                            mSEService.isNFCEventAllowed(
+                            mSEService.isNfcEventAllowed(
                                     reader,
                                     null,
-                                    mNfcEventInstalledPackages.toArray(installedPackages));
+                                    mNfcEventInstalledPackages.toArray(installedPackages),mUserId);
                     if (accessList == null) {
                         if (DBG2)
                             Log.d(
@@ -6766,7 +6786,7 @@ public class NfcService implements DeviceHostListener {
                         }
                     }
                 } catch (RemoteException e) {
-                    Log.e(TAG, "Error in isNFCEventAllowed() " + e);
+                    Log.e(TAG, "Error in isNfcEventAllowed() " + e);
                 }
             }
             if (nfcAccessFinal == null) {
@@ -6842,11 +6862,11 @@ public class NfcService implements DeviceHostListener {
             for (String reader : readers) {
                 try {
                     boolean[] accessList =
-                            mSEService.isNFCEventAllowed(
+                            mSEService.isNfcEventAllowed(
                                     reader,
                                     null,
                                     mNfcPreferredPaymentChangedInstalledPackages.toArray(
-                                            installedPackages));
+                                            installedPackages),mUserId);
                     if (accessList == null) {
                         continue;
                     }
@@ -6859,7 +6879,7 @@ public class NfcService implements DeviceHostListener {
                         }
                     }
                 } catch (RemoteException e) {
-                    Log.e(TAG, "Error in isNFCEventAllowed() " + e);
+                    Log.e(TAG, "Error in isNfcEventAllowed() " + e);
                 }
             }
             if (nfcAccessFinal == null) {
