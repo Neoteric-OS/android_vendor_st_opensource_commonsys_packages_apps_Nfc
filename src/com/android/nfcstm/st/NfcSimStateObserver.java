@@ -205,7 +205,7 @@ public class NfcSimStateObserver extends BroadcastReceiver {
                 updateSimState(simId, STATE_PRESENT_READY);
             } else if (iccState.equals(IccCardConstants.INTENT_VALUE_ICC_READY)) {
                 // modem still working on it, not good time to init SWP
-                updateSimState(simId, STATE_PRESENT_BUSY);
+                updateSimState(simId, STATE_PRESENT_READY);
             } else if (iccState.equals(IccCardConstants.INTENT_VALUE_ICC_IMSI)) {
                 updateSimState(simId, STATE_PRESENT_BUSY);
             } else if (iccState.equals(IccCardConstants.INTENT_VALUE_ABSENT_ON_PERM_DISABLED)) {
