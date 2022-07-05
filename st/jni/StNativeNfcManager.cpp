@@ -12,6 +12,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ *
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #include <android-base/stringprintf.h>
@@ -52,6 +57,7 @@
 using android::base::StringPrintf;
 
 extern tNFA_DM_DISC_FREQ_CFG* p_nfa_dm_rf_disc_freq_cfg;  // defined in stack
+extern bool nfc_sec_flag;
 namespace android {
 extern bool gIsTagDeactivating;
 extern bool gIsSelectingRfInterface;
@@ -1828,7 +1834,7 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
       }
     }
 
-    if (stat == NFA_STATUS_OK && sIsNfaEnabled == false) {
+    if (!nfc_sec_flag && stat == NFA_STATUS_OK && sIsNfaEnabled == false) {
       ENABLE_TIMER = NfcConfig::getUnsigned("RE_ENABLE_TIMER", 500);
       DLOG_IF(INFO, nfc_debug_enabled)
           << StringPrintf("%s; ENABLE_TIMER = %d ", __func__, ENABLE_TIMER);
@@ -1925,6 +1931,9 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
     if (sIsNfaEnabled) stat = NFA_Disable(FALSE /* ungraceful */);
 
     theInstance.Finalize();
+  }
+  if(nfc_sec_flag){
+    PowerSwitch::getInstance().initialize(PowerSwitch::UNKNOWN_LEVEL);
   }
 
 TheEnd:
