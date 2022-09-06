@@ -32,6 +32,12 @@
  *
  * <p>****************************************************************************
  */
+/*
+ *Changes from Qualcomm Innovation Center are provided under the following license:
+ *Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ *SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 package com.android.nfcstm;
 
 import com.android.nfcstm.st.StDeviceHost;
@@ -6250,7 +6256,11 @@ public class NfcService implements DeviceHostListener {
                     }
                 case MSG_INVOKE_BEAM:
                     {
-                        mP2pLinkManager.onManualBeamInvoke((BeamShareData) msg.obj);
+                        try {
+                            mP2pLinkManager.onManualBeamInvoke((BeamShareData) msg.obj);
+                        } catch (Exception e){
+                            Log.e(TAG, "NFCSTM Invalid Beam Content received.");
+                        }
                         break;
                     }
                 case MSG_COMMIT_ROUTING:
