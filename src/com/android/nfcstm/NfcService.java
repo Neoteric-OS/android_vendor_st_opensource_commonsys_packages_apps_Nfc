@@ -4869,6 +4869,7 @@ public class NfcService implements DeviceHostListener {
                                     tag.getTechList(),
                                     tag.getTechExtras(),
                                     tag.getHandle(),
+                                    mCookieUpToDate,
                                     this);
                     return newTag;
                 } catch (Exception e) {
@@ -4921,21 +4922,15 @@ public class NfcService implements DeviceHostListener {
         }
 
         @Override
-        public void setTagUpToDate(long cookie) throws RemoteException {
-            if (DBG) Log.d(TAG, "Register Tag " + Long.toString(cookie) + " as the latest");
-            mCookieUpToDate = cookie;
-        }
-
-        @Override
         public boolean isTagUpToDate(long cookie) throws RemoteException {
-            if (mCookieUpToDate == cookie) {
+            if (mCookieUpToDate != -1 && mCookieUpToDate == cookie) {
                 if (DBG) Log.d(TAG, "Tag " + Long.toString(cookie) + " is up to date");
                 return true;
             }
 
             if (DBG) Log.d(TAG, "Tag " + Long.toString(cookie) + " is out of date");
-            EventLog.writeEvent(
-                    0x534e4554, "199291025", -1, "The obsolete tag was attempted to be accessed");
+            EventLog.writeEvent(0x534e4554, "199291025", -1,
+                    "The obsolete tag was attempted to be accessed");
             return false;
         }
     }
@@ -6312,7 +6307,8 @@ public class NfcService implements DeviceHostListener {
                                 Tag.createMockTag(
                                         new byte[] {0x00},
                                         new int[] {TagTechnology.NDEF},
-                                        new Bundle[] {extras});
+                                        new Bundle[] {extras},
+                                        mCookieUpToDate);
                         Log.d(TAG, "mock NDEF tag, starting corresponding activity");
                         Log.d(TAG, tag.toString());
                         int dispatchStatus = mNfcDispatcher.dispatchTag(tag);
@@ -6994,6 +6990,7 @@ public class NfcService implements DeviceHostListener {
                                 tagEndpoint.getTechList(),
                                 tagEndpoint.getTechExtras(),
                                 tagEndpoint.getHandle(),
+                                mCookieUpToDate,
                                 mNfcTagService);
                 registerTagObject(tagEndpoint);
                 if (readerParams != null) {

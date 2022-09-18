@@ -24,6 +24,7 @@
 
 #include "JavaClassConstants.h"
 
+#include "unicode/platform.h"
 #include "NfcStExtensions.h"
 #include "StSecureElement.h"
 #include "StRoutingManager.h"
