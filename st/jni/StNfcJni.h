@@ -60,4 +60,6 @@ extern jmethodID gCachedNfcManagerNotifyRawAuthStatus;
 extern jmethodID gCachedNfcManagerNotifyDetectionFOD;
 
 extern jmethodID gCachedNfcManagerNotifyPollingLoopData;
+
+extern jmethodID gCachedNfcManagerNotifyTZNfcSecureZoneReported;
 }  // namespace android

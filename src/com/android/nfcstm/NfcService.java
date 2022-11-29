@@ -825,6 +825,13 @@ public class NfcService implements DeviceHostListener {
         new EnableDisableTask().execute(TASK_ENABLE);
     }
 
+    /** TZ Secure Zone Notification to Disable NFC **/
+    @Override
+    public void onTZNfcSecureZoneReported() {
+        if (DBG) Log.d(TAG, "onTZNfcSecureZoneReported() - Disbaling NFC Service");
+        new EnableDisableTask().execute(TASK_DISABLE);
+    }
+
     final class ReaderModeParams {
         public int flags;
         public IAppCallback callback;

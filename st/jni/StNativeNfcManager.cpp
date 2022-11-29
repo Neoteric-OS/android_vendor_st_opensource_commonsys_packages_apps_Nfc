@@ -145,6 +145,8 @@ jmethodID gCachedNfcManagerNotifyIntfActivatedNtf;
 jmethodID gCachedNfcManagerNotifyRawAuthStatus;
 jmethodID gCachedNfcManagerNotifyPollingLoopData;
 
+jmethodID gCachedNfcManagerNotifyTZNfcSecureZoneReported;
+
 const char* gNativeP2pDeviceClassName =
     "com/android/nfcstm/dhimpl/NativeP2pDevice";
 const char* gNativeLlcpServiceSocketClassName =
@@ -1405,6 +1407,9 @@ static jboolean stNfcManager_initNativeStruc(JNIEnv* e, jobject o) {
   gCachedNfcManagerNotifyPollingLoopData = e->GetMethodID(
       cls.get(), "notifyPollingLoopData", "(Ljava/lang/String;)V");
 
+  gCachedNfcManagerNotifyTZNfcSecureZoneReported =
+      e->GetMethodID(cls.get(), "notifyTZNfcSecureZoneReported", "()V");
+
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", __func__);
   return JNI_TRUE;
 }
@@ -1603,6 +1608,24 @@ void nfaDeviceManagementCallback(uint8_t dmEvent,
           << StringPrintf("%s; NFA_DM_INTF_ACTIVATED_EVT;", __func__);
       NfcStExtensions::getInstance().notifyIntfActivatedEvent(
           eventData->intf_activated.len, eventData->intf_activated.pdata);
+    } break;
+
+    case NFA_DM_TZ_SECURE_ZONE_DISABLE_NFC_EVT:/*TZ Secure Zone entry event to Disable NFC*/ {
+      DLOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s: NFA_DM_TZ_SECURE_ZONE_DISABLE_NFC_EVT; received from TZ and disabling NFC", __func__);
+      struct nfc_jni_native_data* nat = getNative(NULL, NULL);
+      JNIEnv* t = NULL;
+      ScopedAttach attach(nat->vm, &t);
+      if (t == NULL) {
+        LOG(ERROR) << StringPrintf("%s; jni env is null, crashing NFC service", __func__);
+        PowerSwitch::getInstance().initialize(PowerSwitch::UNKNOWN_LEVEL);
+        //////////////////////////////////////////////
+        // crash the NFC service process so it can restart automatically
+        abort();
+      } else {
+        t->CallVoidMethod(nat->manager,
+                          android::gCachedNfcManagerNotifyTZNfcSecureZoneReported);
+      }
     } break;
 
     default:

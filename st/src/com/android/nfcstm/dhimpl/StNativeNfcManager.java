@@ -560,4 +560,9 @@ public class StNativeNfcManager implements StDeviceHost {
     private void notifyPollingLoopData(String data) {
         mListener.onPollingLoopData(data);
     }
+
+    // TZ secure zone notification reported from HAL to Disable NFC
+    private void notifyTZNfcSecureZoneReported() {
+        mListener.onTZNfcSecureZoneReported();
+    }
 }

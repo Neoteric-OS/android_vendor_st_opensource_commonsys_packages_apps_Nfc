@@ -51,6 +51,15 @@
  *
  * <p>****************************************************************************
  */
+
+ /******************************************************************************
+ *  Changes from Qualcomm Innovation Center are provided under the following license:
+ *
+ *  Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ *  SPDX-License-Identifier: BSD-3-Clause-Clear
+ *
+ ******************************************************************************/
+
 package com.android.nfcstm;
 
 import android.annotation.Nullable;
@@ -107,6 +116,9 @@ public interface DeviceHost {
         public void onIntfActivatedNtfReceived(byte[] data);
 
         public void onPollingLoopData(String data);
+
+        /** Notifies TZ Secure Zone Notification **/
+        public void onTZNfcSecureZoneReported();
     }
 
     public interface TagEndpoint {
