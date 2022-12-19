@@ -156,7 +156,8 @@ public class HostNfcFEmulationManager {
                     NfcStatsLog.write(
                             NfcStatsLog.NFC_CARDEMULATION_OCCURRED,
                             NfcStatsLog.NFC_CARDEMULATION_OCCURRED__CATEGORY__HCE_PAYMENT,
-                            "HCEF");
+                            "HCEF",
+			    -1);
                     break;
                 case STATE_W4_SERVICE:
                     Log.d(TAG, "Unexpected packet in STATE_W4_SERVICE");

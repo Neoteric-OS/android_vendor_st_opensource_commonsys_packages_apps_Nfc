@@ -285,12 +285,14 @@ public class HostEmulationManager {
                             NfcStatsLog.write(
                                     NfcStatsLog.NFC_CARDEMULATION_OCCURRED,
                                     NfcStatsLog.NFC_CARDEMULATION_OCCURRED__CATEGORY__HCE_PAYMENT,
-                                    "HCE");
+                                    "HCE",
+                                    -1);
                         } else {
                             NfcStatsLog.write(
                                     NfcStatsLog.NFC_CARDEMULATION_OCCURRED,
                                     NfcStatsLog.NFC_CARDEMULATION_OCCURRED__CATEGORY__HCE_OTHER,
-                                    "HCE");
+                                    "HCE",
+                                    -1);
                         }
                     } else {
                         Log.d(

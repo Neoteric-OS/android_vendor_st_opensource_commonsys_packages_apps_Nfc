@@ -40,6 +40,7 @@
 
 package com.android.nfcstm;
 
+import android.annotation.Nullable;
 import com.android.nfcstm.st.StDeviceHost;
 import android.app.ActivityManager;
 import android.app.Application;
@@ -79,6 +80,7 @@ import android.nfc.ErrorCodes;
 import android.nfc.FormatException;
 import android.nfc.IAppCallback;
 import android.nfc.INfcAdapter;
+import android.nfc.NfcAntennaInfo;
 import android.nfc.INfcAdapterExtras;
 import android.nfc.INfcCardEmulation;
 import android.nfc.INfcControllerAlwaysOnListener;
@@ -688,7 +690,8 @@ public class NfcService implements DeviceHostListener {
         NfcStatsLog.write(
                 NfcStatsLog.NFC_CARDEMULATION_OCCURRED,
                 NfcStatsLog.NFC_CARDEMULATION_OCCURRED__CATEGORY__OFFHOST,
-                seName);
+                seName,
+                -1);
     }
 
     @Override
@@ -2497,6 +2500,18 @@ public class NfcService implements DeviceHostListener {
             new EnableDisableTask().execute(TASK_ENABLE);
 
             return true;
+        }
+
+        /**
+         * Returns information regarding Nfc antennas on the device
+         * such as their relative positioning on the device.
+         *
+         * @return Information on the nfc antenna(s) on the device.
+         * @throws UnsupportedOperationException if FEATURE_NFC is unavailable.
+        */
+        @Nullable
+        public NfcAntennaInfo getNfcAntennaInfo() {
+            return null;
         }
 
         @Override
