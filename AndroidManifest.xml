@@ -23,8 +23,8 @@
         android:sharedUserLabel="@string/nfcUserLabel"
 >
     <overlay android:targetPackage="com.android.nfcstm"
-    android:requiredSystemPropertyName="ro.boot.product.vendor.sku"
-    android:requiredSystemPropertyValue="pineapple" />
+    android:requiredSystemPropertyName="ro.hardware.nfc"
+    android:requiredSystemPropertyValue="ST_NFC" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
