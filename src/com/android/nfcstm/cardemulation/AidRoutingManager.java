@@ -383,7 +383,6 @@ public class AidRoutingManager {
     }
 
     public boolean configureRouting(HashMap<String, AidEntry> aidMap, boolean force) {
-
         // Reset overflow switch, if still needed, it will be computed here
         NfcService.getInstance().resetOverflowSwitchInformation();
 
@@ -394,13 +393,23 @@ public class AidRoutingManager {
 
         // Retrieve last default route value, it might have been modified by
         // user
-        mDefaultRoute = NfcService.getInstance().getDefaultAidRoute();
+        int newDefaultRoute = NfcService.getInstance().getDefaultAidRoute();
+        // mDefaultRoute = NfcService.getInstance().getDefaultAidRoute();
         // Initialize list with default route so that it is the first route
         // checked
-        if (mDefaultRoute == 0xFF) {
-            mDefaultRoute = doGetDefaultRouteDestination();
+        if (newDefaultRoute == 0xFF) {
+            newDefaultRoute = doGetDefaultRouteDestination();
         }
-        mDefaultRoute = NfcService.getInstance().getConnectedNfceeId(mDefaultRoute);
+        newDefaultRoute = NfcService.getInstance().getConnectedNfceeId(newDefaultRoute);
+
+        if (mDefaultRoute != newDefaultRoute) {
+            if (DBG)
+                Log.d(
+                        TAG,
+                        "configureRouting() - Default AID route modified since last check, force update");
+            force = true;
+        }
+        mDefaultRoute = newDefaultRoute;
 
         mDefaultIsoDepRoute = NfcService.getInstance().getDefaultIsoDepRoute();
         // Initialize list with default route so that it is the first route

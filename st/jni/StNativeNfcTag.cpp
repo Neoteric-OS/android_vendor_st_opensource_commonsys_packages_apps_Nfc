@@ -130,6 +130,7 @@ static int sCurrentConnectedTargetProtocol = NFC_PROTOCOL_UNKNOWN;
 static int sIsoDepPresCheckCnt = 0;
 static bool sIsoDepPresCheckAlternate = false;
 static int sPresCheckErrCnt = 0;
+static unsigned sPresCheckCount = 0;
 static int sPresCheckStatus = 0;
 static bool sCashbeeStatus = false;
 
@@ -217,6 +218,7 @@ void nativeNfcTag_abortWaits() {
 
   sIsoDepPresCheckCnt = 0;
   sPresCheckErrCnt = 0;
+  sPresCheckCount = 0;
   sIsoDepPresCheckAlternate = false;
   sCashbeeStatus = false;
 
@@ -781,6 +783,7 @@ static jint nativeNfcTag_doConnect(JNIEnv*, jobject, jint targetHandle) {
 
   sIsoDepPresCheckCnt = 0;
   sPresCheckErrCnt = 0;
+  sPresCheckCount = 0;
   sIsoDepPresCheckAlternate = false;
 
   gIsReconfiguringDiscovery.start();
@@ -1871,6 +1874,7 @@ void nativeNfcTag_resetPresenceCheck() {
   sIsTagPresent = true;
   sIsoDepPresCheckCnt = 0;
   sPresCheckErrCnt = 0;
+  sPresCheckCount = 0;
   sIsoDepPresCheckAlternate = false;
   sPresCheckStatus = 0;
   NfcTag::getInstance().mCashbeeDetected = false;
@@ -2049,10 +2053,57 @@ static jboolean nativeNfcTag_doPresenceCheck(JNIEnv*, jobject) {
         << StringPrintf("%s; tag absent", __func__);
 
     nativeNfcTag_resetPresenceCheck();
+  } else if ((NfcTag::getInstance().mLptdPresenceCheckSwitch !=
+              NfcTag::LPTD_PRS_CHK_DISABLE) &&
+             (NfcTag::getInstance().mLptdPresenceCheckNum != 0)) {
+    // LPTD_PRES_CHECK_SWITCH enalbed in libnfc-nci.conf
+    // mLptdPresenceCheckNum is set LPTD_PRS_CHK_DEFAULT
+    sPresCheckCount++;
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("sPresCheckCount = %d", sPresCheckCount);
+
+    if ((unsigned)sPresCheckCount >=
+        NfcTag::getInstance().mLptdPresenceCheckNum) {
+      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("enter LPTD PresCheck");
+      NFA_DeactivateExt(NFA_DEACTIVATE_TYPE_LPTD);
+
+      return JNI_FALSE;
+    }
   }
 
   return isPresent;
 }  // namespace android
+
+/*******************************************************************************
+**
+** Function:        nativeNfcTag_doEnableLptdPresenceCheck
+**
+** Description:     Enable LPTD Presence Check.
+**                  e: JVM environment.
+**                  o: Java object.
+**
+** Returns:         True.
+**
+*******************************************************************************/
+static jboolean nativeNfcTag_doEnableLptdPresenceCheck(JNIEnv*, jobject,
+                                                       jboolean enable) {
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", __func__);
+  uint8_t num = NfcTag::getInstance().mLptdPresenceCheckSwitch;
+
+  NfcTag::getInstance().mLptdPresenceCheckNum = NfcTag::LPTD_PRS_CHK_DISABLE;
+
+  if (num != NfcTag::LPTD_PRS_CHK_DISABLE) {
+    if ((bool)enable) {
+      NfcTag::getInstance().mLptdPresenceCheckNum =
+          NfcTag::LPTD_PRS_CHK_DEFAULT;
+    } else {
+      DLOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s; LPTD_PRES_CHECK_SWITCH is disabled.", __func__);
+    }
+  }
+
+  return JNI_TRUE;
+}
 
 /*******************************************************************************
 **
@@ -2365,6 +2416,8 @@ static JNINativeMethod gMethods[] = {
     {"doRead", "()[B", (void*)nativeNfcTag_doRead},
     {"doWrite", "([B)Z", (void*)nativeNfcTag_doWrite},
     {"doPresenceCheck", "()Z", (void*)nativeNfcTag_doPresenceCheck},
+    {"doEnableLptdPresenceCheck", "(Z)Z",
+     (void*)nativeNfcTag_doEnableLptdPresenceCheck},
     {"doIsIsoDepNdefFormatable", "([B[B)Z",
      (void*)nativeNfcTag_doIsIsoDepNdefFormatable},
     {"doNdefFormat", "([B)Z", (void*)nativeNfcTag_doNdefFormat},

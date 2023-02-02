@@ -107,6 +107,10 @@ class StRoutingManager {
 
   static const int INVALID_ROUTE_VALUE = 0xff;
 
+  static const int TECH_A_MIFARE = 0x01;
+  static const int TECH_A_ISO_DEP = 0x02;
+  static const int TECH_B_ISO_DEP = 0x04;
+
   static void nfaEeCallback(tNFA_EE_EVT event, tNFA_EE_CBACK_DATA* eventData);
   static void nfcFCeCallback(uint8_t event, tNFA_CONN_EVT_DATA* eventData);
 

@@ -37,6 +37,7 @@
 using android::base::StringPrintf;
 extern bool nfc_debug_enabled;
 extern SyncEvent gIsReconfiguringDiscovery;
+extern Mutex gMutexEE;
 
 namespace android {
 extern bool isDiscoveryStarted();
@@ -295,6 +296,40 @@ void StCardEmulationEmbedded::nfaEeCallback(tNFA_EE_EVT event,
 
 /*******************************************************************************
  **
+ ** Function:        checkNdefNfceeAvailable
+ **
+ ** Description:     Checks if NDEF-NFCEE is available
+ **
+ ** Returns:         None
+ **
+ *******************************************************************************/
+int StCardEmulationEmbedded::checkNdefNfceeAvailable() {
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
+  int i, nfceeId = 0;
+  uint8_t numEE = MAX_NUM_EE;
+
+  tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
+  gMutexEE.lock();
+  if ((nfaStat = NFA_EeGetInfo(&numEE, mEeInfo)) != NFA_STATUS_OK) {
+    LOG(ERROR) << StringPrintf("%s; fail get info; error=0x%X", __func__,
+                               nfaStat);
+    gMutexEE.unlock();
+    return nfceeId;
+  }
+
+  for (i = 0; i < numEE; i++) {
+    if ((mEeInfo[i].ee_handle & 0x80) == 0x00) {
+      nfceeId = mEeInfo[i].ee_handle;
+      break;
+    }
+  }
+
+  gMutexEE.unlock();
+  return nfceeId;
+}
+
+/*******************************************************************************
+ **
  ** Function:        enable
  **
  ** Description:     Release all resources.
@@ -310,6 +345,7 @@ bool StCardEmulationEmbedded::enable(uint8_t ceeId, bool enable) {
   tNFA_EE_INFO& eeItem = mEeInfo[0];
   bool found_ee = false;
   bool status = false;
+  tNFA_EE_INFO localEeInfo[MAX_NUM_EE];
 
   if (enable == true) {
     DLOG_IF(INFO, nfc_debug_enabled)
@@ -320,13 +356,18 @@ bool StCardEmulationEmbedded::enable(uint8_t ceeId, bool enable) {
   }
 
   // Check if requested CEE was reported by CLF
+  gMutexEE.lock();
   if ((nfaStat = NFA_EeGetInfo(&numEE, mEeInfo)) != NFA_STATUS_OK) {
     LOG(ERROR) << StringPrintf("%s; fail get info; error=0x%X", fn, nfaStat);
+    gMutexEE.unlock();
   } else {
+    memcpy(&localEeInfo, &mEeInfo, sizeof(mEeInfo));
+    gMutexEE.unlock();
+
     for (i = 0; i < numEE; i++) {
-      if (mEeInfo[i].ee_handle == (ceeId | NFA_HANDLE_GROUP_EE)) {
+      if (localEeInfo[i].ee_handle == (ceeId | NFA_HANDLE_GROUP_EE)) {
         // Requested NFCEE Id was reported by CLF
-        eeItem = mEeInfo[i];
+        eeItem = localEeInfo[i];
         found_ee = true;
         break;
       }
@@ -396,20 +437,32 @@ bool StCardEmulationEmbedded::connect(uint8_t ceeId) {
   tNFA_EE_INFO& eeItem = mEeInfo[0];
   bool found_ee = false;
   bool status = false;
+  tNFA_EE_INFO localEeInfo[MAX_NUM_EE];
 
   DLOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s; enter; requesting to connect CEE 0x%x", fn, ceeId);
 
+  if (ceeId & 0x80) {
+    LOG(ERROR) << StringPrintf(
+        "%s; NFCEE Id pertains to an HCI NFCEE, not an NDEF-NFCEE", fn);
+    return false;
+  }
+
   gIsReconfiguringDiscovery.start();
 
   // Check if requested CEE was reported by CLF
+  gMutexEE.lock();
   if ((nfaStat = NFA_EeGetInfo(&numEE, mEeInfo)) != NFA_STATUS_OK) {
     LOG(ERROR) << StringPrintf("%s; fail get info; error=0x%X", fn, nfaStat);
+    gMutexEE.unlock();
   } else {
+    memcpy(&localEeInfo, &mEeInfo, sizeof(mEeInfo));
+    gMutexEE.unlock();
+
     for (i = 0; i < numEE; i++) {
-      if (mEeInfo[i].ee_handle == (ceeId | NFA_HANDLE_GROUP_EE)) {
+      if (localEeInfo[i].ee_handle == (ceeId | NFA_HANDLE_GROUP_EE)) {
         // Requested NFCEE Id was reported by CLF
-        eeItem = mEeInfo[i];
+        eeItem = localEeInfo[i];
         found_ee = true;
         break;
       }
@@ -577,19 +630,6 @@ bool StCardEmulationEmbedded::disconnect(uint8_t ceeId) {
       mEeDisconnEvent.wait();  // wait for NFA_EE_DISCONNECT_EVT
     } else {
       LOG(ERROR) << StringPrintf("%s; NFA_EeDisconnect failed; error=0x%X", fn,
-                                 nfaStat);
-      return false;
-    }
-  }
-  // Disable the NFCEE
-  {
-    SyncEventGuard guard(mEeSetModeEvent);
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; set EE mode deactivate; h=0x%X", fn, ceeId);
-    if ((nfaStat = NFA_EeModeSet((eeHandle), false)) == NFA_STATUS_OK) {
-      mEeSetModeEvent.wait();  // wait for NFA_EE_MODE_SET_EVT
-    } else {
-      LOG(ERROR) << StringPrintf("%s; NFA_EeModeSet failed; error=0x%X", fn,
                                  nfaStat);
       return false;
     }

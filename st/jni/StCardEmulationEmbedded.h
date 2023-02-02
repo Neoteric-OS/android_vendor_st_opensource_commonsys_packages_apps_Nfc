@@ -84,6 +84,8 @@ class StCardEmulationEmbedded {
 
   bool disconnect(uint8_t ceeId);
 
+  int checkNdefNfceeAvailable();
+
  private:
   static StCardEmulationEmbedded sCardEmulationEmbedded;
   nfc_jni_native_data* mNativeData;

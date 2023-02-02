@@ -117,7 +117,9 @@ public class RegisteredServicesCache {
     String mLastAddedPackage = null;
 
     public interface Callback {
-        void onServicesUpdated(int userId, final List<StApduServiceInfo> services);
+        /** ServicesUpdated for specific userId. */
+        void onServicesUpdated(
+                int userId, List<StApduServiceInfo> services, boolean validateInstalled);
     };
 
     static class DynamicSettings {
@@ -191,7 +193,11 @@ public class RegisteredServicesCache {
                             if (!replaced) {
                                 int currentUser = ActivityManager.getCurrentUser();
                                 if (currentUser == getProfileParentId(UserHandle.getUserId(uid))) {
-                                    invalidateCache(UserHandle.getUserId(uid));
+                                    if (Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
+                                        invalidateCache(UserHandle.getUserId(uid), true);
+                                    } else {
+                                        invalidateCache(UserHandle.getUserId(uid), false);
+                                    }
                                 } else {
                                     // Cache will automatically be updated on user switch
                                 }
@@ -233,7 +239,7 @@ public class RegisteredServicesCache {
         synchronized (mLock) {
             readDynamicSettingsLocked();
             for (UserHandle uh : mUserHandles) {
-                invalidateCache(uh.getIdentifier());
+                invalidateCache(uh.getIdentifier(), false);
             }
         }
     }
@@ -409,8 +415,9 @@ public class RegisteredServicesCache {
         return validServices;
     }
 
-    public void invalidateCache(int userId) {
-        if (DBG) Log.d(TAG, "invalidateCache()");
+    /** invalidateCache for specific userId. */
+    public void invalidateCache(int userId, boolean validateInstalled) {
+        if (DBG) Log.d(TAG, "invalidateCache(enter)");
 
         final ArrayList<StApduServiceInfo> validServices = getInstalledStServices(userId);
         if (validServices == null) {
@@ -502,7 +509,9 @@ public class RegisteredServicesCache {
             writeServiceStateToFile(userId);
         }
 
-        mCallback.onServicesUpdated(userId, Collections.unmodifiableList(validServices));
+        mCallback.onServicesUpdated(
+                userId, Collections.unmodifiableList(validServices), validateInstalled);
+        if (DBG) Log.d(TAG, "invalidateCache() - validServices: ");
         dump(validServices);
     }
 
@@ -536,7 +545,9 @@ public class RegisteredServicesCache {
                             String uidString = parser.getAttributeValue(null, "uid");
                             String offHostString = parser.getAttributeValue(null, "offHostSE");
                             if (compString == null || uidString == null) {
-                                Log.e(TAG, "Invalid service attributes");
+                                Log.e(
+                                        TAG,
+                                        "readDynamicSettingsLocked() - Invalid service attributes");
                             } else {
                                 try {
                                     currentUid = Integer.parseInt(uidString);
@@ -704,7 +715,7 @@ public class RegisteredServicesCache {
             newServices = new ArrayList<StApduServiceInfo>(services.services.values());
         }
         // Make callback without the lock held
-        mCallback.onServicesUpdated(userId, newServices);
+        mCallback.onServicesUpdated(userId, newServices, true);
         return true;
     }
 
@@ -749,7 +760,7 @@ public class RegisteredServicesCache {
             newServices = new ArrayList<StApduServiceInfo>(services.services.values());
         }
         // Make callback without the lock held
-        mCallback.onServicesUpdated(userId, newServices);
+        mCallback.onServicesUpdated(userId, newServices, true);
         return true;
     }
 
@@ -990,7 +1001,7 @@ public class RegisteredServicesCache {
                             + ":WriteServiceStateToFile");
             success = writeServiceStateToFile(userId);
         }
-        invalidateCache(ActivityManager.getCurrentUser());
+        invalidateCache(ActivityManager.getCurrentUser(), false);
         return (success ? 0x00 : 0xFF);
     }
 
@@ -1068,7 +1079,7 @@ public class RegisteredServicesCache {
                 idx++;
             }
             // Make callback without the lock held
-            mCallback.onServicesUpdated(userId, newServices);
+            mCallback.onServicesUpdated(userId, newServices, true);
         }
 
         // need to return commit status to framework API
@@ -1151,14 +1162,13 @@ public class RegisteredServicesCache {
             }
         }
         if (success) {
-            mCallback.onServicesUpdated(userId, newServices);
+            mCallback.onServicesUpdated(userId, newServices, true);
         }
         return success;
     }
 
     public void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
-        pw.println("HCENfc_RegisteredServicesCache - Registered HCE services for current user: ");
-
+        pw.println("dump()");
         synchronized (mLock) {
             for (UserHandle uh : mUserHandles) {
                 UserManager um =

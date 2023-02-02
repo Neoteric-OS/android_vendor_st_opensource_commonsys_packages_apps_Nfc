@@ -46,6 +46,7 @@ extern void nativeNfcTag_registerNdefTypeHandler();
 extern void nativeNfcTag_deregisterNdefTypeHandler();
 extern void startRfDiscovery(bool isStart);
 extern bool isDiscoveryStarted();
+extern bool gIsDtaEnabled;
 }  // namespace android
 
 PeerToPeer PeerToPeer::sP2p;
@@ -109,6 +110,14 @@ void PeerToPeer::initialize() {
 
   if (NfcConfig::hasKey(NAME_P2P_LISTEN_TECH_MASK))
     mP2pListenTechMask = NfcConfig::getUnsigned(NAME_P2P_LISTEN_TECH_MASK);
+
+  if (gIsDtaEnabled == true) {
+    mP2pListenTechMask &= ~NFA_TECHNOLOGY_MASK_ACTIVE;
+    mP2pListenTechMask |= (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_F);
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; P2P listen tech=0x%X for DTA SNEP testing",
+                        __func__, mP2pListenTechMask);
+  }
 }
 
 /*******************************************************************************
@@ -1105,6 +1114,14 @@ void PeerToPeer::resetP2pListenMask() {
                        NFA_TECHNOLOGY_MASK_F_ACTIVE;
   if (NfcConfig::hasKey("P2P_LISTEN_TECH_MASK"))
     mP2pListenTechMask = NfcConfig::getUnsigned("P2P_LISTEN_TECH_MASK");
+
+  if (gIsDtaEnabled == true) {
+    mP2pListenTechMask &= ~NFA_TECHNOLOGY_MASK_ACTIVE;
+    mP2pListenTechMask |= (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_F);
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; P2P listen tech=0x%X for DTA SNEP testing",
+                        __func__, mP2pListenTechMask);
+  }
 }
 
 /*******************************************************************************

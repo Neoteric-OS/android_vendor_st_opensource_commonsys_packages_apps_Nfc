@@ -81,11 +81,13 @@ static void rawNfaConnectionCallback(uint8_t connEvent,
   sExtRawEvent.end();
 }
 
+static SyncEvent sExtRawLib;
 static void *mRawHandle = NULL;
 static int (*mRawJniSeqSplit)(int, uint8_t *, size_t, uint8_t *, size_t,
                               size_t *) = NULL;
 
 static void rawJniUnload() {
+  sExtRawLib.start();
   mRawJniSeqSplit = NULL;
   if (mRawHandle) {
     dlclose(mRawHandle);
@@ -93,10 +95,12 @@ static void rawJniUnload() {
     DLOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s; Unloaded library", __func__);
   }
+  sExtRawLib.end();
 }
 
 static int (*rawJniLoad())(int, uint8_t *, size_t, uint8_t *, size_t,
                            size_t *) {
+  sExtRawLib.start();
   if (!mRawJniSeqSplit) {
     mRawHandle = dlopen("libstnfc_raw.so", RTLD_NOW);
     if (mRawHandle) {
@@ -117,6 +121,7 @@ static int (*rawJniLoad())(int, uint8_t *, size_t, uint8_t *, size_t,
       }
     }
   }
+  sExtRawLib.end();
   return mRawJniSeqSplit;
 }
 
@@ -139,7 +144,9 @@ int rawJniSeq(int i, uint8_t *inba, size_t inbasz, uint8_t *outba,
   // Is there an external module ?
   pRawJniSeqSplit = rawJniLoad();
   if (pRawJniSeqSplit) {
+    sExtRawLib.start();
     ret = (*pRawJniSeqSplit)(i, inba, inbasz, outba, outbaszmax, outbasz);
+    sExtRawLib.end();
     goto end;
   }
 

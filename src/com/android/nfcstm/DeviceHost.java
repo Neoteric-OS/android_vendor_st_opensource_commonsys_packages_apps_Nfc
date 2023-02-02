@@ -130,6 +130,8 @@ public interface DeviceHost {
 
         boolean presenceCheck();
 
+        boolean enableLptdPresenceCheck(boolean enable);
+
         boolean isPresent();
 
         void startPresenceChecking(

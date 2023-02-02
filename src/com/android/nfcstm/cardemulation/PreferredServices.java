@@ -178,16 +178,14 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
         }
 
         // Load current payment default from settings
+        UserHandle currentUser = UserHandle.of(ActivityManager.getCurrentUser());
         UserManager um =
-                mContext.createContextAsUser(
-                                UserHandle.of(ActivityManager.getCurrentUser()), /*flags=*/ 0)
+                mContext.createContextAsUser(currentUser, /*flags=*/ 0)
                         .getSystemService(UserManager.class);
         List<UserHandle> userHandles = um.getEnabledProfiles();
-
         String name = null;
         String newDefaultName = null;
         UserHandle newUser = null;
-        UserHandle currentUser = null;
         // search for default payment setting within enabled profiles
         for (UserHandle uh : userHandles) {
             name =
@@ -324,6 +322,7 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                     // Update values
                     mPaymentDefaults.settingsDefault = mPaymentDefaults.currentPreferred;
                     mPaymentDefaults.currentPreferred = newDefault;
+                    mPaymentDefaults.mUserHandle = newUser;
                 } else {
 
                     if (DBG) Log.d(TAG, "loadDefaultsFromSettings() - Still in overflow");
@@ -353,8 +352,10 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                 mPaymentDefaults.settingsDefault = newDefault;
                 if (newDefault != null && !newDefault.equals(mPaymentDefaults.currentPreferred)) {
                     mPaymentDefaults.currentPreferred = newDefault;
+                    mPaymentDefaults.mUserHandle = newUser;
                 } else if (newDefault == null && mPaymentDefaults.currentPreferred != null) {
                     mPaymentDefaults.currentPreferred = newDefault;
+                    mPaymentDefaults.mUserHandle = newUser;
                 } else {
                     // Same default as before
                 }

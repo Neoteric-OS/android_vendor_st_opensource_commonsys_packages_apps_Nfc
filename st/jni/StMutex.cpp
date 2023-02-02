@@ -55,6 +55,7 @@ Mutex::Mutex() {
   if (res != 0) {
     LOG(ERROR) << StringPrintf("%s; fail init; error=0x%X", __func__, res);
   }
+  (void)pthread_mutexattr_destroy(&attr);
 }
 
 /*******************************************************************************

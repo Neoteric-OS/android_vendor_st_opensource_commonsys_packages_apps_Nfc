@@ -498,7 +498,7 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
         int DesiredUicc = 0;
         String UiccStr = mContentProviderUtil.getUserDesiredUiccString();
         String eSEStr = mContentProviderUtil.getUserDesiredeSEString();
-        Log.d(TAG, "restorePreviousSe() - UiccStr = " + UiccStr + ", eSEStr= " + eSEStr);
+        Log.d(TAG, "restorePreviousSe(enter) - UiccStr = " + UiccStr + ", eSEStr= " + eSEStr);
         if (UiccStr == null && eSEStr == null) {
             // isFirstTime = true;
             DefaultSe = SystemProperties.get("persist.st_nfc_defaut_se");
@@ -559,6 +559,19 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
             RefreshSeStatus(false);
         }
         // mContentProviderUtil.setAvailableSeList();
+
+        // Check NDEF-NFCEE
+        int ndefNfceeId = mStExtensions.checkNdefNfceeAvailable();
+        if (ndefNfceeId != 0x00) {
+            Log.d(
+                    TAG,
+                    "restorePreviousSe() - NDEF-NFCEE supported, enabling NFCEE Id = "
+                            + String.format("0x%02X", ndefNfceeId));
+
+            mStExtensions.EnableSE(ndefNfceeId, true);
+        }
+
+        Log.d(TAG, "restorePreviousSe(exit) ");
 
         return ret;
     }

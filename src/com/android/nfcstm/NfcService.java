@@ -125,6 +125,7 @@ import android.os.SystemClock;
 import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.os.VibrationAttributes;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.Settings;
@@ -357,6 +358,8 @@ public class NfcService implements DeviceHostListener {
 
     // set to true to enable Toast on reading failed, as per AOSP.
     private static final boolean TAG_READ_FAIL_SHOW_TOAST = false;
+    private static final VibrationAttributes HARDWARE_FEEDBACK_VIBRATION_ATTRIBUTES =
+            VibrationAttributes.createForUsage(VibrationAttributes.USAGE_HARDWARE_FEEDBACK);
 
     private final UserManager mUserManager;
 
@@ -1232,8 +1235,14 @@ public class NfcService implements DeviceHostListener {
             for (UserHandle uh : luh) {
                 if (um.isQuietModeEnabled(uh)) continue;
 
-                PackageManager pm =
-                        mContext.createContextAsUser(uh, /*flags=*/ 0).getPackageManager();
+                PackageManager pm;
+                try {
+                    pm = mContext.createContextAsUser(uh, /*flags=*/ 0).getPackageManager();
+                } catch (IllegalStateException e) {
+                    Log.d(TAG, "Fail to get PackageManager for user: " + uh);
+                    continue;
+                }
+
                 List<PackageInfo> packagesNfcEvents =
                         pm.getPackagesHoldingPermissions(
                                 new String[] {android.Manifest.permission.NFC_TRANSACTION_EVENT},
@@ -1634,10 +1643,6 @@ public class NfcService implements DeviceHostListener {
                 mP2pLinkManager.enableDisable(false, false);
             }
 
-            // Disable delay polling when disabling
-            mPollingDelayed = false;
-            mHandler.removeMessages(MSG_DELAY_POLLING);
-
             // Stop watchdog if tag present
             // A convenient way to stop the watchdog properly consists of
             // disconnecting the tag. The polling loop shall be stopped before
@@ -1647,6 +1652,9 @@ public class NfcService implements DeviceHostListener {
             mHandler.cancelPendingFieldEvent();
 
             synchronized (NfcService.this) {
+                // Disable delay polling when disabling
+                mPollingDelayed = false;
+                mHandler.removeMessages(MSG_DELAY_POLLING);
                 mPollingDisableDeathRecipients.clear();
                 mReaderModeParams = null;
             }
@@ -3832,13 +3840,17 @@ public class NfcService implements DeviceHostListener {
     class InCardSwitchRunnable implements Runnable {
         @Override
         public void run() {
-            // default RF dynamic parameters
-            mNfcWalletAdapter.rotateRfParameters(true);
-
-            // release SWP, parameters update should have started.
-            mNfcWalletAdapter.keepEseSwpActive(false);
+            synchronized (NfcService.this) {
+                if (isNfcEnabled()) {
+                    // default RF dynamic parameters
+                    mDeviceHost.rotateRfParameters(true);
+                    // release SWP, parameters update should have started.
+                    doKeepSwpActive(false);
+                    mDeviceHost.doSetMuteTech(
+                            muteARequested, muteBRequested, muteFRequested, false);
+                }
+            }
             mInCardSwitchCnt = 0;
-            mDeviceHost.doSetMuteTech(muteARequested, muteBRequested, muteFRequested, false);
             mInCardSwitchLock.release();
         }
     }
@@ -4210,8 +4222,9 @@ public class NfcService implements DeviceHostListener {
                                 + mRawIsAuth
                                 + ", mRawDuration:"
                                 + mRawDuration);
-
-            NfcPermissions.enforceAdminPermissionsClient(mContext);
+            if (duration != 0) {
+                NfcPermissions.enforceAdminPermissionsClient(mContext);
+            }
 
             if (duration < 0) {
                 duration = 0;
@@ -6902,9 +6915,15 @@ public class NfcService implements DeviceHostListener {
                             mContext.sendBroadcastAsUser(intent, userHandle);
                         }
                     }
-                    PackageManager pm =
-                            mContext.createContextAsUser(userHandle, /*flags=*/ 0)
-                                    .getPackageManager();
+                    PackageManager pm;
+                    try {
+                        pm =
+                                mContext.createContextAsUser(userHandle, /*flags=*/ 0)
+                                        .getPackageManager();
+                    } catch (IllegalStateException e) {
+                        Log.d(TAG, "Fail to get PackageManager for user: " + userHandle);
+                        continue;
+                    }
                     for (String packageName :
                             mNfcPreferredPaymentChangedInstalledPackages.get(userId)) {
                         try {
@@ -7018,7 +7037,8 @@ public class NfcService implements DeviceHostListener {
                 if (readerParams != null) {
                     try {
                         if ((readerParams.flags & NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS) == 0) {
-                            mVibrator.vibrate(mVibrationEffect);
+                            mVibrator.vibrate(
+                                    mVibrationEffect, HARDWARE_FEEDBACK_VIBRATION_ATTRIBUTES);
                             playSound(SOUND_END);
                         }
                         if (readerParams.callback != null) {
@@ -7048,18 +7068,27 @@ public class NfcService implements DeviceHostListener {
                 int dispatchResult = mNfcDispatcher.dispatchTag(tag);
                 if (dispatchResult == NfcDispatcher.DISPATCH_FAIL && !mInProvisionMode) {
                     if (DBG) Log.d(TAG, "dispatchTagEndpoint() - Tag dispatch failed");
+                    tagEndpoint.enableLptdPresenceCheck(true);
                     unregisterObject(tagEndpoint.getHandle());
-
                     if ((mPollDelay > NO_POLL_DELAY) && (isNfcEnabled())) {
                         tagEndpoint.stopPresenceChecking(false);
-
                         mDeviceHost.startStopPolling(false);
-                        mPollingDelayed = true;
-                        if (DBG) Log.d(TAG, "dispatchTagEndpoint() - Polling delayed");
-                        mHandler.sendMessageDelayed(
-                                mHandler.obtainMessage(MSG_DELAY_POLLING), mPollDelay);
+                        synchronized (NfcService.this) {
+                            if (!mPollingDelayed) {
+                                mPollingDelayed = true;
+                                mDeviceHost.startStopPolling(false);
+                                if (DBG) Log.d(TAG, "dispatchTagEndpoint() - Polling delayed");
+                                mHandler.sendMessageDelayed(
+                                        mHandler.obtainMessage(MSG_DELAY_POLLING), mPollDelay);
+                            } else {
+                                if (DBG)
+                                    Log.d(
+                                            TAG,
+                                            "dispatchTagEndpoint() - Keep waiting for polling delay");
+                            }
+                        }
                     } else {
-                        Log.e(TAG, "dispatchTagEndpoint() - Keep presence checking.");
+                        Log.d(TAG, "dispatchTagEndpoint() - Keep presence checking.");
                     }
                     if (mScreenState == ScreenStateHelper.SCREEN_STATE_ON_UNLOCKED
                             && mNotifyDispatchFailed) {
@@ -7096,7 +7125,8 @@ public class NfcService implements DeviceHostListener {
                                 0);
                     }
                     mDispatchFailedCount = 0;
-                    mVibrator.vibrate(mVibrationEffect);
+                    tagEndpoint.enableLptdPresenceCheck(false);
+                    mVibrator.vibrate(mVibrationEffect, HARDWARE_FEEDBACK_VIBRATION_ATTRIBUTES);
                     playSound(SOUND_END);
                 }
             } catch (Exception e) {
@@ -7490,6 +7520,14 @@ public class NfcService implements DeviceHostListener {
                             || action.equals(Intent.ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE)) {
                         updatePackageCache();
                     } else if (action.equals(Intent.ACTION_SHUTDOWN)) {
+                        if (DBG)
+                            Log.d(
+                                    TAG,
+                                    "mOwnerReceiver.onReceive() - Shutdown received with UserId: "
+                                            + getSendingUserId());
+                        if (getSendingUserId() != UserHandle.USER_ALL) {
+                            return;
+                        }
                         if (DBG) Log.d(TAG, "Device is shutting down.");
                         if (mIsAlwaysOnSupported && mAlwaysOnState == NfcAdapter.STATE_ON) {
                             new EnableDisableTask().execute(TASK_DISABLE_ALWAYS_ON);

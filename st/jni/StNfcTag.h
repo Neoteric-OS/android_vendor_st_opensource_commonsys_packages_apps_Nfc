@@ -60,6 +60,11 @@ class NfcTag {
 
   bool mIsSkipMifareInterface;
 
+  uint8_t mLptdPresenceCheckSwitch;
+  uint8_t mLptdPresenceCheckNum;
+  static const uint8_t LPTD_PRS_CHK_DISABLE = 0;
+  static const uint8_t LPTD_PRS_CHK_DEFAULT = 4;
+
   /*******************************************************************************
   **
   ** Function:        NfcTag

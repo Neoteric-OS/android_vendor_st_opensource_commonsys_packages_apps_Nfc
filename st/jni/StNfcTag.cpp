@@ -118,6 +118,8 @@ void NfcTag::initialize(nfc_jni_native_data* native) {
   mIsActivated = false;
   mActivationState = Idle;
   mProtocol = NFC_PROTOCOL_UNKNOWN;
+  mLptdPresenceCheckNum = 0;
+  mLptdPresenceCheckSwitch = 0;
   mNumTechList = 0;
   mNumDiscNtf = 0;
   mNumDiscTechList = 0;
@@ -130,6 +132,10 @@ void NfcTag::initialize(nfc_jni_native_data* native) {
   if (NfcConfig::hasKey(NAME_PRESENCE_CHECK_ALGORITHM))
     mPresenceCheckAlgorithm =
         NfcConfig::getUnsigned(NAME_PRESENCE_CHECK_ALGORITHM);
+
+  if (NfcConfig::hasKey(NAME_LPTD_PRES_CHECK_SWITCH))
+    mLptdPresenceCheckSwitch =
+        NfcConfig::getUnsigned(NAME_LPTD_PRES_CHECK_SWITCH);
 
   mIsP2pDetectedButPaused = false;
 }

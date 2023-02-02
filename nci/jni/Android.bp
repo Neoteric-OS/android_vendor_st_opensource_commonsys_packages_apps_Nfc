@@ -20,7 +20,8 @@ cc_library_static {
         "NativeP2pDevice.cpp",
         "PeerToPeer.cpp",
         "RouteDataSet.cpp",
-        "PowerSwitch.cpp"
+        "PowerSwitch.cpp",
+        "NfcDta.cpp"
 		],
 
     export_include_dirs :
@@ -48,7 +49,10 @@ cc_library_static {
 
     product_variables: {
         debuggable: {
-            cflags: ["-DDCHECK_ALWAYS_ON"],
+            cflags: [
+                "-DDCHECK_ALWAYS_ON",
+                "-DDTA_ENABLED"
+            ],
         },
     },
     sanitize: {

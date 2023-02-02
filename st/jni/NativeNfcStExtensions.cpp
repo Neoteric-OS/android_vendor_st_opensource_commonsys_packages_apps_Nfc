@@ -915,6 +915,22 @@ jbyteArray nativeNfcStExtensions_rawJniSeq(JNIEnv *e, jobject o, jint i,
   }
 }
 
+/*******************************************************************************
+**
+** Function:        nativeNfcStExtensions_checkNdefNfceeAvailable
+**
+** Description:     Checks if NDEF-NFCEE is available
+**                  e: JVM environment.
+**                  o: Java object.
+**
+** Returns:         NFCEE id of NDEF NFCEE is present, 0x00 otherwise
+**
+*******************************************************************************/
+static jint nativeNfcStExtensions_checkNdefNfceeAvailable(JNIEnv *e,
+                                                          jobject o) {
+  return StCardEmulationEmbedded::getInstance().checkNdefNfceeAvailable();
+}
+
 /*****************************************************************************
 **
 ** Description:     JNI functions
@@ -969,7 +985,8 @@ static JNINativeMethod gMethods[] = {
     {"rawRfAuth", "(Z)Z", (void *)nativeNfcStExtensions_rawRfAuth},
     {"rawRfMode", "(Z)Z", (void *)nativeNfcStExtensions_rawRfMode},
     {"rawJniSeq", "(I[B)[B", (void *)nativeNfcStExtensions_rawJniSeq},
-};
+    {"checkNdefNfceeAvailable", "()I",
+     (void *)nativeNfcStExtensions_checkNdefNfceeAvailable}};
 
 /*******************************************************************************
 **

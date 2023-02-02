@@ -80,7 +80,7 @@ public class NativeNfcTag implements TagEndpoint {
         private boolean isPaused = false;
         private boolean doCheck = true;
 
-        public PresenceCheckWatchdog(
+        PresenceCheckWatchdog(
                 int presenceCheckDelay, @Nullable DeviceHost.TagDisconnectedCallback callback) {
             watchdogTimeout = presenceCheckDelay;
             tagDisconnectedCallback = callback;
@@ -194,25 +194,6 @@ public class NativeNfcTag implements TagEndpoint {
                         // status = 0;
                     }
                     status = reconnectWithStatus(i);
-                    /*
-                    if ((technology != TagTechnology.ISO_DEP) &&
-                        (hasTechOnHandle(TagTechnology.ISO_DEP, mTechHandles[i]))) {
-                        // Don't allow to connect a -4 tag at a different level
-                        // than IsoDep, as this is not supported by
-                        // libNFC.
-                        // revised for NFCA... do allow to connect a -4 tag at this level.
-                        Log.d(TAG,"Connect to a tech with same different handle (rf intf change)");
-                        status = reconnectWithStatus(i);
-                        if (status == 0) {
-                            mConnectedHandle = mTechHandles[i];
-                            mConnectedTechIndex = i;
-                        }
-                        //status = 0;
-                    } else {
-                        status = 0;
-                    }
-                    */
-
                     if (status == 0) {
                         mConnectedTechIndex = i;
                         // Handle was already identical
@@ -571,11 +552,11 @@ public class NativeNfcTag implements TagEndpoint {
         }
     }
 
-    // This method exists to "patch in" the ndef technologies,
-    // which is done inside Java instead of the native JNI code.
-    // To not create some nasty dependencies on the order on which things
-    // are called (most notably getTechExtras()), it needs some additional
-    // checking.
+    /**
+     * This method exists to "patch in" the ndef technologies, which is done inside Java instead of
+     * the native JNI code. To not create some nasty dependencies on the order on which things are
+     * called (most notably getTechExtras()), it needs some additional checking.
+     */
     public void addNdefTechnology(
             NdefMessage msg,
             int handle,
@@ -707,104 +688,88 @@ public class NativeNfcTag implements TagEndpoint {
                 Bundle extras = new Bundle();
                 switch (mTechList[i]) {
                     case TagTechnology.NFC_A:
-                        {
-                            byte[] actBytes = mTechActBytes[i];
-                            if ((actBytes != null) && (actBytes.length > 0)) {
-                                extras.putShort(
-                                        NfcA.EXTRA_SAK, (short) (actBytes[0] & (short) 0xFF));
-                            } else {
-                                // Unfortunately Jewel doesn't have act bytes,
-                                // ignore this case.
-                            }
-                            extras.putByteArray(NfcA.EXTRA_ATQA, mTechPollBytes[i]);
-                            break;
+                        if ((mTechActBytes[i] != null) && (mTechActBytes[i].length > 0)) {
+                            extras.putShort(
+                                    NfcA.EXTRA_SAK, (short) (mTechActBytes[i][0] & (short) 0xFF));
+                        } else {
+                            // Unfortunately Jewel doesn't have act bytes,
+                            // ignore this case.
                         }
+                        extras.putByteArray(NfcA.EXTRA_ATQA, mTechPollBytes[i]);
+                        break;
 
                     case TagTechnology.NFC_B:
-                        {
-                            // What's returned from the PN544 is actually:
-                            // 4 bytes app data
-                            // 3 bytes prot info
-                            byte[] appData = new byte[4];
-                            byte[] protInfo = new byte[3];
-                            if (mTechPollBytes[i].length >= 7) {
-                                System.arraycopy(mTechPollBytes[i], 0, appData, 0, 4);
-                                System.arraycopy(mTechPollBytes[i], 4, protInfo, 0, 3);
 
-                                extras.putByteArray(NfcB.EXTRA_APPDATA, appData);
-                                extras.putByteArray(NfcB.EXTRA_PROTINFO, protInfo);
-                            }
-                            break;
+                        // What's returned from the PN544 is actually:
+                        // 4 bytes app data
+                        // 3 bytes prot info
+                        byte[] appData = new byte[4];
+                        byte[] protInfo = new byte[3];
+                        if (mTechPollBytes[i].length >= 7) {
+                            System.arraycopy(mTechPollBytes[i], 0, appData, 0, 4);
+                            System.arraycopy(mTechPollBytes[i], 4, protInfo, 0, 3);
+
+                            extras.putByteArray(NfcB.EXTRA_APPDATA, appData);
+                            extras.putByteArray(NfcB.EXTRA_PROTINFO, protInfo);
                         }
+                        break;
 
                     case TagTechnology.NFC_F:
-                        {
-                            byte[] pmm = new byte[8];
-                            byte[] sc = new byte[2];
-                            if (mTechPollBytes[i].length >= 8) {
-                                // At least pmm is present
-                                System.arraycopy(mTechPollBytes[i], 0, pmm, 0, 8);
-                                extras.putByteArray(NfcF.EXTRA_PMM, pmm);
-                            }
-                            if (mTechPollBytes[i].length == 10) {
-                                System.arraycopy(mTechPollBytes[i], 8, sc, 0, 2);
-                                extras.putByteArray(NfcF.EXTRA_SC, sc);
-                            }
-                            break;
+                        byte[] pmm = new byte[8];
+                        byte[] sc = new byte[2];
+                        if (mTechPollBytes[i].length >= 8) {
+                            // At least pmm is present
+                            System.arraycopy(mTechPollBytes[i], 0, pmm, 0, 8);
+                            extras.putByteArray(NfcF.EXTRA_PMM, pmm);
                         }
+                        if (mTechPollBytes[i].length == 10) {
+                            System.arraycopy(mTechPollBytes[i], 8, sc, 0, 2);
+                            extras.putByteArray(NfcF.EXTRA_SC, sc);
+                        }
+                        break;
 
                     case TagTechnology.ISO_DEP:
-                        {
-                            if (hasTech(TagTechnology.NFC_A)) {
-                                extras.putByteArray(IsoDep.EXTRA_HIST_BYTES, mTechActBytes[i]);
-                            } else {
-                                extras.putByteArray(IsoDep.EXTRA_HI_LAYER_RESP, mTechActBytes[i]);
-                            }
-                            break;
+                        if (hasTech(TagTechnology.NFC_A)) {
+                            extras.putByteArray(IsoDep.EXTRA_HIST_BYTES, mTechActBytes[i]);
+                        } else {
+                            extras.putByteArray(IsoDep.EXTRA_HI_LAYER_RESP, mTechActBytes[i]);
                         }
+                        break;
 
                     case TagTechnology.NFC_V:
-                        {
-                            // First byte response flags, second byte DSFID
-                            if (mTechPollBytes[i] != null && mTechPollBytes[i].length >= 2) {
-                                extras.putByte(NfcV.EXTRA_RESP_FLAGS, mTechPollBytes[i][0]);
-                                extras.putByte(NfcV.EXTRA_DSFID, mTechPollBytes[i][1]);
-                            }
-                            break;
+
+                        // First byte response flags, second byte DSFID
+                        if (mTechPollBytes[i] != null && mTechPollBytes[i].length >= 2) {
+                            extras.putByte(NfcV.EXTRA_RESP_FLAGS, mTechPollBytes[i][0]);
+                            extras.putByte(NfcV.EXTRA_DSFID, mTechPollBytes[i][1]);
                         }
+                        break;
 
                     case TagTechnology.MIFARE_ULTRALIGHT:
-                        {
-                            if (mClassifyT2T) {
-                                boolean isUlc = isUltralightC();
-                                extras.putBoolean(MifareUltralight.EXTRA_IS_UL_C, isUlc);
-                            }
-                            break;
+                        if (mClassifyT2T) {
+                            boolean isUlc = isUltralightC();
+                            extras.putBoolean(MifareUltralight.EXTRA_IS_UL_C, isUlc);
                         }
+                        break;
 
                     case TagTechnology.MIFARE_CLASSIC:
-                        {
-                            byte[] actBytes = mTechActBytes[i];
-                            if ((actBytes != null) && (actBytes.length > 0)) {
-                                extras.putShort(
-                                        NfcA.EXTRA_SAK, (short) (actBytes[0] & (short) 0xFF));
-                            }
-                            extras.putByteArray(NfcA.EXTRA_ATQA, mTechPollBytes[i]);
-                            break;
+                        if ((mTechActBytes[i] != null) && (mTechActBytes[i].length > 0)) {
+                            extras.putShort(
+                                    NfcA.EXTRA_SAK, (short) (mTechActBytes[i][0] & (short) 0xFF));
                         }
+                        extras.putByteArray(NfcA.EXTRA_ATQA, mTechPollBytes[i]);
+                        break;
 
                     case TagTechnology.NFC_BARCODE:
-                        {
-                            // hard code this for now, this is the only valid type
-                            extras.putInt(NfcBarcode.EXTRA_BARCODE_TYPE, NfcBarcode.TYPE_KOVIO);
-                            break;
-                        }
+
+                        // hard code this for now, this is the only valid type
+                        extras.putInt(NfcBarcode.EXTRA_BARCODE_TYPE, NfcBarcode.TYPE_KOVIO);
+                        break;
 
                     default:
-                        {
-                            // Leave the entry in the array null
-                            continue;
-                        }
+
+                        // Leave the entry in the array null
+                        continue;
                 }
                 mTechExtras[i] = extras;
             }

@@ -54,6 +54,15 @@ extern void startRfDiscovery(bool isStart);
 extern void pollingChanged(int discoveryEnabled, int pollingEnabled,
                            int p2pEnabled);
 extern bool isDiscoveryStarted();
+
+extern Mutex gMutexConfig;
+extern void nfaConnectionCallback(uint8_t event, tNFA_CONN_EVT_DATA* eventData);
+extern void nfaDeviceManagementCallback(uint8_t event,
+                                        tNFA_DM_CBACK_DATA* eventData);
+
+extern bool gIsDtaEnabled;
+extern SyncEvent sNfaEnableEvent;   // event for NFA_Enable()
+extern SyncEvent sNfaDisableEvent;  // event for NFA_Disable()
 }  // namespace android
 
 //////////////////////////////////////////////
@@ -108,6 +117,7 @@ NfcStExtensions::NfcStExtensions() {
   mStClfFieldMonitorThread = (pthread_t)NULL;
   mRawRfPropStatus = 0;
   mIsExtRawMode = false;
+  mSwpCltSent = false;
 }
 
 /*******************************************************************************
@@ -165,6 +175,10 @@ void NfcStExtensions::initialize(nfc_jni_native_data* native) {
 
   num = NfcConfig::getUnsigned(NAME_POLLING_TECH_MASK, DEFAULT_TECH_MASK);
   if (num) {  // Poll mode
+    if (android::gIsDtaEnabled == true) {
+      num &= ~(unsigned long)(NFA_TECHNOLOGY_MASK_ACTIVE);
+    }
+
     mRfConfig.modeBitmap |= (0x1 << READER_IDX);
     mRfConfig.techArray[READER_IDX] = num;
 
@@ -192,6 +206,10 @@ void NfcStExtensions::initialize(nfc_jni_native_data* native) {
   // P2P listen
   /////////////
   num = NfcConfig::getUnsigned("P2P_LISTEN_TECH_MASK", 0x6F);
+  if (android::gIsDtaEnabled == true) {
+    num &= ~(unsigned long)(NFA_TECHNOLOGY_MASK_ACTIVE);
+    num |= ((unsigned long)(NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_F));
+  }
   if (num) {  // P2P listen mode
     mRfConfig.modeBitmap |= (0x1 << P2P_LISTEN_IDX);
     mRfConfig.techArray[P2P_LISTEN_IDX] = num;
@@ -294,10 +312,47 @@ void NfcStExtensions::initialize(nfc_jni_native_data* native) {
  ** Returns:         None
  **
  *******************************************************************************/
-void NfcStExtensions::notifyRestart() {
+void NfcStExtensions::notifyRestart(bool ese_reset, bool ese_syncid) {
   JNIEnv* e = NULL;
   LOG(INFO) << StringPrintf("%s; Restart resquested", __func__);
   ScopedAttach attach(mNativeData->vm, &e);
+
+  if (ese_reset || ese_syncid) {
+    // find the eSE NFCEE ID
+    // Clear the sync id in the CLF
+    uint8_t i;
+    uint8_t nfceeid[3];
+    uint8_t conInfo[3];
+    uint8_t resetSyncId[] = {0x82};
+    uint16_t recvBufferActualSize = 0;
+    uint8_t recvBuffer[256];
+
+#define PROP_RESET_SYNC_ID 0x00
+#define PROP_TEST_RESET_ST54J_SE 0x01
+
+    // find the correct NFCEE ID
+    uint8_t num =
+        StSecureElement::getInstance().retrieveHostList(nfceeid, conInfo);
+    for (i = 0; i < num; i++) {
+      if (((nfceeid[i] & 0x83) == 0x82)) {
+        resetSyncId[0] = nfceeid[i];  // 82 or 86
+        break;
+      }
+    }
+
+    if (ese_syncid) {
+      // Send the command to reset sync ID
+      sendPropTestCmd(OID_ST_TEST_CMD, PROP_RESET_SYNC_ID, resetSyncId,
+                      sizeof(resetSyncId), recvBuffer, recvBufferActualSize);
+    }
+
+    if (ese_reset && ((mHwInfo & 0xFF00) != 0x0400)) {
+      // No need to reset for ST54H, the CLF reset will reset the eSE.
+      sendPropTestCmd(OID_ST_TEST_CMD, PROP_TEST_RESET_ST54J_SE, resetSyncId, 0,
+                      recvBuffer, recvBufferActualSize);
+    }
+  }
+
   if (e == NULL) {
     LOG(ERROR) << StringPrintf("jni env is null");
     return;
@@ -311,9 +366,9 @@ void NfcStExtensions::notifyRestart() {
 
 /*******************************************************************************
  **
- ** Function:        notifyRestart
+ ** Function:        getIsRecovery
  **
- ** Description:     Notify Stack restart needed.
+ ** Description:
  **
  ** Returns:         None
  **
@@ -2582,8 +2637,10 @@ bool NfcStExtensions::setObserverMode(bool enable) {
 
   if (needUnmuteTechForObserverMode()) mIsObserverMode = enable;
 
+  android::gMutexConfig.lock();
   status =
       NFA_SetConfig(NCI_PARAM_ID_PROP_OBSERVER_MODE, sizeof(param), &param[0]);
+  android::gMutexConfig.unlock();
 
   // Update MuteTec/RT accordingly
   uint8_t muteTechBitmap = StRoutingManager::getInstance().getMuteTech();
@@ -2727,7 +2784,7 @@ void NfcStExtensions::setNciConfig(int param_id, uint8_t* param, int length) {
     nfa_set_config[0] = (param[0] == 0x01 ? 0 : 1);
 
     SyncEventGuard guard(mNfaConfigEvent);
-
+    android::gMutexConfig.lock();
     tNFA_STATUS nfaStat =
         NFA_SetConfig(NCI_PARAM_ID_NFCC_CONFIG_CONTROL, sizeof(nfa_set_config),
                       &nfa_set_config[0]);
@@ -2737,10 +2794,12 @@ void NfcStExtensions::setNciConfig(int param_id, uint8_t* param, int length) {
       LOG(ERROR) << StringPrintf("%s; NFA_SetConfig() failed; error=0x%X", fn,
                                  nfaStat);
     }
+    android::gMutexConfig.unlock();
   }
 
   {
     SyncEventGuard guard(mNfaConfigEvent);
+    android::gMutexConfig.lock();
     nfaStat = NFA_SetConfig(param_id, length, param);
     if (nfaStat == NFA_STATUS_OK) {
       mNfaConfigEvent.wait();  // wait for NFA_DM_SET_CONFIG_EVT
@@ -2748,6 +2807,7 @@ void NfcStExtensions::setNciConfig(int param_id, uint8_t* param, int length) {
       LOG(ERROR) << StringPrintf("%s; NFA_SetConfig() failed; error=0x%X", fn,
                                  nfaStat);
     }
+    android::gMutexConfig.unlock();
   }
 
   if (mustRestartDiscovery) {
@@ -3133,11 +3193,14 @@ int NfcStExtensions::FwTsDiffToMs(uint32_t fwtsstart, uint32_t fwtsend) {
 #define T_TxCtrl 0x31
 #define T_TxI 0x32
 #define T_TxIr 0x33
+#define T_TxSwpClt 0x34
 #define T_RxAct 0x35
 #define T_RxCtrl 0x36
 #define T_RxI 0x37
 #define T_RxErr 0x38
+#define T_RxSwpClt 0x39
 #define T_SwpDeact 0x3B
+#define T_LogOverwrite 0xFF
 
 /*******************************************************************************
  **
@@ -3337,6 +3400,7 @@ void NfcStExtensions::StHandleLogDataDynParams(uint8_t format,
         (void)pthread_create(
             &p, &pa, (THREADFUNCPTR)&NfcStExtensions::rotateRfParameters,
             (void*)false);
+        (void)pthread_attr_destroy(&pa);
       }
     }
   }
@@ -3361,6 +3425,7 @@ void NfcStExtensions::StHandleLogDataDynParams(uint8_t format,
         (void)pthread_create(
             &p, &pa, (THREADFUNCPTR)&NfcStExtensions::rotateRfParameters,
             (void*)true);
+        (void)pthread_attr_destroy(&pa);
       }
     } else if (p_data[0] == T_fieldOn) {
       mDynFwTsT2Started = 0;  // stop T2
@@ -3888,37 +3953,8 @@ void NfcStExtensions::StMatchSelectSw(uint8_t format, uint16_t data_len,
  **
  *******************************************************************************/
 void NfcStExtensions::StMonitorSeActivationWATriggered(NfcStExtensions* inst) {
-  JNIEnv* e = NULL;
-  ScopedAttach attach(inst->mNativeData->vm, &e);
-
-  // Clear the sync id in the CLF
-  uint8_t i;
-  uint8_t nfceeid[3];
-  uint8_t conInfo[3];
-  uint8_t resetSyncId[] = {0x82};
-  uint16_t recvBufferActualSize = 0;
-  uint8_t recvBuffer[256];
-
-#define PROP_RESET_SYNC_ID 0x00
-
-  // find the correct NFCEE ID
-  uint8_t num =
-      StSecureElement::getInstance().retrieveHostList(nfceeid, conInfo);
-  for (i = 0; i < num; i++) {
-    if (((nfceeid[i] & 0x83) == 0x82)) {
-      resetSyncId[0] = nfceeid[i];  // 82 or 86
-      break;
-    }
-  }
-
-  // Send the command to reset sync ID
-  inst->sendPropTestCmd(OID_ST_TEST_CMD, PROP_RESET_SYNC_ID, resetSyncId,
-                        sizeof(resetSyncId), recvBuffer, recvBufferActualSize);
-
-  // Restart the stack to force CLF reset, which resets ST54H_SE
   LOG(ERROR) << "Restart NFC to trigger full init again";
-  e->CallVoidMethod(inst->mNativeData->manager,
-                    android::gCachedNfcManagerNotifyHwErrorReported);
+  inst->notifyRestart(false, true);
 }
 
 void NfcStExtensions::StMonitorSeActivation(uint8_t format, uint16_t data_len,
@@ -3993,6 +4029,7 @@ void NfcStExtensions::StMonitorSeActivation(uint8_t format, uint16_t data_len,
             &p, &pa,
             (THREADFUNCPTR)&NfcStExtensions::StMonitorSeActivationWATriggered,
             (void*)this);
+        (void)pthread_attr_destroy(&pa);
       }
       break;
   }
@@ -4105,7 +4142,7 @@ void NfcStExtensions::StEseMonitor(uint8_t format, uint16_t data_len,
       mLastSentCounter++;
       if (mLastSentCounter >= 2) {
         LOG(ERROR) << "Same frame repeat on SWP, reset !!!";
-        abort();
+        notifyRestart(true, false);
       }
     } else {
       // different frame, store this one
@@ -4304,6 +4341,72 @@ void* NfcStExtensions::StClfFieldMonitorWorker(NfcStExtensions* inst) {
 
 /*******************************************************************************
 **
+** Function:        StCltMuteMonitor
+**
+** Description:     Check if the eSE did not respond CLT frame in a while
+** Returns:         None
+**
+*******************************************************************************/
+void NfcStExtensions::StCltMuteMonitor(uint8_t format, uint16_t data_len,
+                                       uint8_t* p_data, bool last) {
+  if (data_len < 2) {
+    LOG_IF(INFO, nfc_debug_enabled) << __func__ << "; Size too small";
+    return;
+  }
+  uint8_t t = p_data[0];
+  uint8_t l = p_data[1];
+  if (l != data_len - 2) {
+    LOG_IF(INFO, nfc_debug_enabled) << __func__ << "; Sizes mismatch";
+    return;
+  }
+
+  // If we didn t sent a CLT frame previously
+  if (!mSwpCltSent) {
+    // Check if this is a CLT frame sent to eSE
+    if ((t == T_TxSwpClt) && (p_data[2] == 0x01)) {
+      mSwpCltSent = true;
+    }
+  } else {
+    // Did eSE send a response ?
+    if ((t == T_RxSwpClt) && (p_data[2] == 0x01)) {
+      mSwpCltSent = false;
+    }
+    // If FW log buffer overflow, or if field off, assume we are not stuck
+    else if ((t == T_LogOverwrite) || (t == T_fieldOff)) {
+      mSwpCltSent = false;
+    }
+    // if SWP line deactivated ==> trigger WA (restart discovery) and
+    // mSwpCltSent = false
+    else if ((t == T_SwpDeact) && (p_data[2] == 0x01)) {
+      pthread_attr_t pa;
+      pthread_t p;
+      mSwpCltSent = false;
+      DLOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s; triggered!", __func__);
+      // Trigger a call to restart discovery.
+      (void)pthread_attr_init(&pa);
+      (void)pthread_attr_setdetachstate(&pa, PTHREAD_CREATE_DETACHED);
+      (void)pthread_create(
+          &p, &pa, (THREADFUNCPTR)&NfcStExtensions::StCltMuteMonitorWorker,
+          NULL);
+      (void)pthread_attr_destroy(&pa);
+    }
+  }
+}
+
+void* NfcStExtensions::StCltMuteMonitorWorker(NfcStExtensions* inst) {
+  DLOG_IF(INFO, nfc_debug_enabled) << "StCltMuteMonitorWorker : started";
+  if (android::isDiscoveryStarted()) {
+    // Restart RF discovery
+    android::startRfDiscovery(false);
+    usleep(200000);
+    android::startRfDiscovery(true);
+  }
+  return NULL;
+}
+
+/*******************************************************************************
+**
 ** Function:        StHandleVsLogData
 **
 ** Description:     H.ndle Vendor-specific logging data
@@ -4364,6 +4467,10 @@ void NfcStExtensions::StHandleVsLogData(uint16_t data_len, uint8_t* p_data) {
       StClfFieldMonitor(p_data[3], current_tlv_length, p_data + current_tlv_pos,
                         current_tlv_pos + current_tlv_length >= data_len);
     }
+    // check if we are not stuck after a CLT frame ignored by eSE.
+    StCltMuteMonitor(p_data[3], current_tlv_length, p_data + current_tlv_pos,
+                     current_tlv_pos + current_tlv_length >= data_len);
+
     // Processor for polling loop data
     if (doPollingLoopData) {
       StHandlePollingLoopData(p_data[3], current_tlv_length,
@@ -4496,7 +4603,7 @@ void NfcStExtensions::StVsCallback(tNFC_VS_EVT event, uint16_t data_len,
 *******************************************************************************/
 void NfcStExtensions::StRestartCallback() {
   LOG(INFO) << StringPrintf("%s - Restart resquested", __func__);
-  NfcStExtensions::getInstance().notifyRestart();
+  NfcStExtensions::getInstance().notifyRestart(false, false);
 }
 
 /*******************************************************************************
@@ -4766,11 +4873,13 @@ bool NfcStExtensions::rotateRfParameters(bool reset) {
 
   {
     SyncEventGuard guard(NfcStExtensions::getInstance().mNfaConfigEvent);
+    android::gMutexConfig.lock();
     status = NFA_SetConfig(NCI_PARAM_ID_PROP_RF_SET_LISTEN_IOT_SEQ,
                            sizeof(param), &param[0]);
     if (status == NFA_STATUS_OK) {
       NfcStExtensions::getInstance().mNfaConfigEvent.wait();
     }
+    android::gMutexConfig.unlock();
   }
 
   if (wasStopped) {
@@ -4888,11 +4997,12 @@ bool NfcStExtensions::sendRawRfCmd(int cmdId, bool enable) {
 
   // send the command to enter / exit RAW RF mode
   {
-    SyncEventGuard guard(mVsActionRequestEvent);
     uint8_t rawRfCmd[2];
 
     rawRfCmd[0] = cmdId;
     rawRfCmd[1] = enable ? 0x01 : 0x00;
+
+    mVsActionRequestEvent.start();
 
     mIsWaitingEvent.setRawRfPropCmd = true;
 
@@ -4901,8 +5011,12 @@ bool NfcStExtensions::sendRawRfCmd(int cmdId, bool enable) {
     if (nfaStat != NFA_STATUS_OK) {
       LOG(ERROR) << StringPrintf(
           "%s; NFA_SendVsCommand() call failed; error=0x%X", __func__, nfaStat);
+      mVsActionRequestEvent.end();
     } else {
       mVsActionRequestEvent.wait();
+      mIsWaitingEvent.setRawRfPropCmd = false;
+      mVsActionRequestEvent.end();
+
       // check status returned by the CLF
       nfaStat = sStExtensions.mRawRfPropStatus;
 
@@ -4914,6 +5028,7 @@ bool NfcStExtensions::sendRawRfCmd(int cmdId, bool enable) {
         (void)pthread_attr_setdetachstate(&pa, PTHREAD_CREATE_DETACHED);
         (void)pthread_create(
             &p, &pa, (THREADFUNCPTR)&NfcStExtensions::sendRawDeAuthNtf, NULL);
+        (void)pthread_attr_destroy(&pa);
       } else if ((cmdId == PROP_CTRL_RF_RAW_MODE_CMD) &&
                  (nfaStat == NFA_STATUS_OK)) {
         mIsExtRawMode = enable;
@@ -4928,18 +5043,18 @@ bool NfcStExtensions::sendRawRfCmd(int cmdId, bool enable) {
 
           if (enable) param[0] = 0x32;  // 50ms, can be fine tuned
 
+          android::gMutexConfig.lock();
           nfaStat = NFA_SetConfig(NCI_PARAM_ID_PROP_POLL_TX_TICK_INTERVAL,
                                   sizeof(param), &param[0]);
           if (nfaStat == NFA_STATUS_OK) {
             mNfaConfigEvent.wait();
           }
+          android::gMutexConfig.unlock();
         }
         // wait 40ms before restart disco
         if (enable) usleep(40000);
       }
     }
-
-    mIsWaitingEvent.setRawRfPropCmd = false;
   }
 
   if (wasStopped) {
@@ -5449,4 +5564,60 @@ void NfcStExtensions::StRPLAddOneEventLocked(char type, uint8_t gain,
   }
 
   mRPLNbEvents++;
+}
+
+/*******************************************************************************
+**
+** Function:        setDtaConfig
+**
+** Description:     Configure the NFC controller for DTA SNEP testing.
+**
+** Returns:         None
+**
+*******************************************************************************/
+void NfcStExtensions::setDtaConfig(tHAL_NFC_ENTRY* halFuncEntries) {
+  tNFA_STATUS nfaStatus = NFA_STATUS_OK;
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
+
+  setProprietaryConfigSettings(NFCC_CONFIGURATION, 0, 4, true);
+
+  {
+    SyncEventGuard guard(android::sNfaDisableEvent);
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; NFA_Disable()", __func__);
+
+    nfaStatus = NFA_Disable(TRUE);
+    if (nfaStatus == NFA_STATUS_OK) {
+      android::sNfaDisableEvent.wait();
+    } else {
+      LOG(ERROR) << StringPrintf("%s; NFA_Disable() returns %d", __func__,
+                                 nfaStatus);
+    }
+  }
+  {
+    NFA_Init(halFuncEntries);
+
+    SyncEventGuard guard(android::sNfaEnableEvent);
+    nfaStatus = NFA_Enable(android::nfaDeviceManagementCallback,
+                           android::nfaConnectionCallback);
+    android::sNfaEnableEvent.wait();  // wait for NFA command to finish
+  }
+  {
+    SyncEventGuard guard(mVsActionRequestEvent);
+    uint8_t mActionRequestParam[] = {0x04, 0x00, 0x06, 0x01, 0x00, 0x08, 0x00,
+                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; Restore config at next CLF reboot", __func__);
+
+    nfaStatus = NFA_SendVsCommand(OID_ST_VS_CMD, sizeof(mActionRequestParam),
+                                  mActionRequestParam, &nfaVsCbActionRequest);
+    if (nfaStatus != NFA_STATUS_OK) {
+      LOG(ERROR) << StringPrintf(
+          "%s; NFA_SendVsCommand() call failed; error=0x%X", __func__,
+          nfaStatus);
+    } else {
+      mVsActionRequestEvent.wait();
+    }
+  }
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", __func__);
 }

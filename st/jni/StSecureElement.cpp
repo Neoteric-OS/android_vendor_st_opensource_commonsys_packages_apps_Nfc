@@ -904,13 +904,10 @@ void StSecureElement::notifyEeStatus(tNFA_HANDLE eeHandle, uint8_t status) {
       eeInfo.ee_status = NFA_EE_STATUS_UNRESPONSIVE;
 
       if (((eeHandle & 0xFF) == 0x82) || ((eeHandle & 0xFF) == 0x86)) {
-        JNIEnv* e = NULL;
-        ScopedAttach attach(mNativeData->vm, &e);
         LOG(ERROR) << StringPrintf(
             "%s; Disable/Enable NFC service following eSE unrecoverable error",
             fn);
-        e->CallVoidMethod(mNativeData->manager,
-                          android::gCachedNfcManagerNotifyHwErrorReported);
+        NfcStExtensions::getInstance().notifyRestart(true, false);
       }
     } else {
       DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; pEE is NULL", fn);
@@ -1104,10 +1101,6 @@ void StSecureElement::nfaHciCallback(tNFA_HCI_EVT event,
       break;
 
     case NFA_HCI_EVENT_RCVD_EVT:
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_HCI_EVENT_RCVD_EVT; code: 0x%X; pipe: 0x%X; data len: %u",
-          fn, eventData->rcvd_evt.evt_code, eventData->rcvd_evt.pipe,
-          eventData->rcvd_evt.evt_len);
       if (eventData->rcvd_evt.evt_code == NFA_HCI_EVT_POST_DATA) {
         LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
             "%s; NFA_HCI_EVENT_RCVD_EVT; NFA_HCI_EVT_POST_DATA", fn);
@@ -1157,7 +1150,8 @@ void StSecureElement::nfaHciCallback(tNFA_HCI_EVT event,
       } else if ((eventData->rcvd_evt.pipe == sSecElem.mEseApduPipeId) &&
                  (eventData->rcvd_evt.evt_code == EVT_TRANSMIT_DATA)) {
         LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-            "%s; NFA_HCI_EVENT_RCVD_EVT; data from APDU pipe", fn);
+            "%s; NFA_HCI_EVENT_RCVD_EVT; data from APDU pipe (0x%x)", fn,
+            eventData->rcvd_evt.pipe);
         SyncEventGuard guard(sSecElem.mTransceiveEvent);
         sSecElem.mActualResponseSize =
             (eventData->rcvd_evt.evt_len > MAX_RESPONSE_SIZE)
@@ -1178,9 +1172,9 @@ void StSecureElement::nfaHciCallback(tNFA_HCI_EVT event,
         sSecElem.mAtrInfo.length = eventData->rcvd_evt.evt_len;
 
         for (int g = 0; g < eventData->rcvd_evt.evt_len; g++) {
-          LOG_IF(INFO, nfc_debug_enabled)
-              << StringPrintf("%s; eventData->rcvd_evt.p_evt_buf[%d] = 0x%x",
-                              fn, g, eventData->rcvd_evt.p_evt_buf[g]);
+          // LOG_IF(INFO, nfc_debug_enabled)
+          //     << StringPrintf("%s; eventData->rcvd_evt.p_evt_buf[%d] = 0x%x",
+          //                     fn, g, eventData->rcvd_evt.p_evt_buf[g]);
           sSecElem.mAtrInfo.data[g] = eventData->rcvd_evt.p_evt_buf[g];
         }
       }

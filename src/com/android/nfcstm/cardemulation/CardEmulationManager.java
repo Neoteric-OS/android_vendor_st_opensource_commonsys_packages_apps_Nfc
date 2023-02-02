@@ -50,6 +50,7 @@ import android.os.RemoteException;
 import android.os.SystemClock;
 import android.os.SystemProperties;
 import android.os.UserHandle;
+import android.os.UserManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.util.proto.ProtoOutputStream;
@@ -281,10 +282,11 @@ public class CardEmulationManager
     }
 
     @Override
-    public void onServicesUpdated(int userId, List<StApduServiceInfo> services) {
+    public void onServicesUpdated(
+            int userId, List<StApduServiceInfo> services, boolean validateInstalled) {
         if (DBG) Log.d(TAG, "onServicesUpdated()");
         // Verify defaults are still sane
-        verifyDefaults(userId, services);
+        verifyDefaults(userId, services, validateInstalled);
         // Update the AID cache
         mAidCache.onServicesUpdated(userId, services);
         // Update the preferred services list
@@ -301,21 +303,75 @@ public class CardEmulationManager
         mEnabledNfcFServices.onServicesUpdated();
     }
 
-    void verifyDefaults(int userId, List<StApduServiceInfo> services) {
-        ComponentName defaultPaymentService =
-                getDefaultServiceForCategory(userId, CardEmulation.CATEGORY_PAYMENT, true);
-        if (DBG)
-            Log.d(
-                    TAG,
-                    "verifyDefaults() - Current default: "
-                            + defaultPaymentService
-                            + " for user:"
-                            + userId);
+    void verifyDefaults(int userId, List<StApduServiceInfo> services, boolean validateInstalled) {
+        UserManager um =
+                mContext.createContextAsUser(UserHandle.of(userId), /*flags=*/ 0)
+                        .getSystemService(UserManager.class);
+        List<UserHandle> luh = um.getEnabledProfiles();
+
+        ComponentName defaultPaymentService = null;
+        int numDefaultPaymentServices = 0;
+        int userIdDefaultPaymentService = userId;
+
+        for (UserHandle uh : luh) {
+            ComponentName paymentService =
+                    getDefaultServiceForCategory(
+                            uh.getIdentifier(),
+                            CardEmulation.CATEGORY_PAYMENT,
+                            validateInstalled && (uh.getIdentifier() == userId));
+            if (DBG) Log.d(TAG, "default: " + paymentService + " for user:" + uh);
+            if (paymentService != null) {
+                numDefaultPaymentServices++;
+                defaultPaymentService = paymentService;
+                userIdDefaultPaymentService = uh.getIdentifier();
+            }
+        }
+        if (numDefaultPaymentServices > 1) {
+            Log.e(TAG, "Current default is not aligned across multiple users");
+            // leave default unset
+            for (UserHandle uh : luh) {
+                setDefaultServiceForCategoryChecked(
+                        uh.getIdentifier(), null, CardEmulation.CATEGORY_PAYMENT);
+            }
+        } else {
+            if (DBG) {
+                Log.d(
+                        TAG,
+                        "Current default: "
+                                + defaultPaymentService
+                                + " for user:"
+                                + userIdDefaultPaymentService);
+            }
+        }
 
         if (defaultPaymentService == null) {
-            // A payment service may have been removed, set default payment selection to "not set".
-            if (DBG) Log.d(TAG, "No default set, last payment service removed.");
-            setDefaultServiceForCategoryChecked(userId, null, CardEmulation.CATEGORY_PAYMENT);
+            // A payment service may have been removed, leaving only one;
+            // in that case, automatically set that app as default.
+            int numPaymentServices = 0;
+            ComponentName lastFoundPaymentService = null;
+            for (StApduServiceInfo service : services) {
+                if (service.hasCategory(CardEmulation.CATEGORY_PAYMENT)) {
+                    numPaymentServices++;
+                    lastFoundPaymentService = service.getComponent();
+                }
+            }
+            if (numPaymentServices > 1) {
+                // More than one service left, leave default unset
+                if (DBG)
+                    Log.d(TAG, "verifyDefaults() - No default set, more than one service left.");
+                setDefaultServiceForCategoryChecked(userId, null, CardEmulation.CATEGORY_PAYMENT);
+            } else if (numPaymentServices == 1) {
+                // Make single found payment service the default
+                if (DBG)
+                    Log.d(TAG, "verifyDefaults() - No default set, making single service default.");
+                setDefaultServiceForCategoryChecked(
+                        userId, lastFoundPaymentService, CardEmulation.CATEGORY_PAYMENT);
+            } else {
+                // No payment services left, leave default at null
+                if (DBG)
+                    Log.d(TAG, "verifyDefaults() - No default set, last payment service removed.");
+                setDefaultServiceForCategoryChecked(userId, null, CardEmulation.CATEGORY_PAYMENT);
+            }
         }
     }
 
@@ -348,20 +404,19 @@ public class CardEmulationManager
     boolean setDefaultServiceForCategoryChecked(
             int userId, ComponentName service, String category) {
 
-        if (service != null)
-            if (DBG)
-                Log.d(
-                        TAG,
-                        "setDefaultServiceForCategoryChecked() - service: "
-                                + service.flattenToString()
-                                + ", category: "
-                                + category);
-            else if (DBG)
-                Log.d(
-                        TAG,
-                        "setDefaultServiceForCategoryChecked() - service: null"
-                                + ", category: "
-                                + category);
+        if ((DBG) && (service != null))
+            Log.d(
+                    TAG,
+                    "setDefaultServiceForCategoryChecked() - service: "
+                            + service.flattenToString()
+                            + ", category: "
+                            + category);
+        else if (DBG)
+            Log.d(
+                    TAG,
+                    "setDefaultServiceForCategoryChecked() - service: null"
+                            + ", category: "
+                            + category);
 
         if (!CardEmulation.CATEGORY_PAYMENT.equals(category)) {
             Log.e(
@@ -374,10 +429,14 @@ public class CardEmulationManager
         // ideally we overlay our local changes over whatever is in
         // Settings.Secure
         if (service == null || mServiceCache.hasService(userId, service)) {
+            String s = null;
+            if (service != null) {
+                s = service.flattenToString();
+            }
             Settings.Secure.putStringForUser(
                     mContext.getContentResolver(),
                     Settings.Secure.NFC_PAYMENT_DEFAULT_COMPONENT,
-                    service != null ? service.flattenToString() : null,
+                    s,
                     userId);
         } else {
             Log.e(
@@ -400,7 +459,7 @@ public class CardEmulationManager
                 Log.d(
                         TAG,
                         "isServiceRegistered() - Didn't find passed in service, invalidating cache.");
-            mServiceCache.invalidateCache(userId);
+            mServiceCache.invalidateCache(userId, true);
         }
         return mServiceCache.hasService(userId, service);
     }
@@ -438,11 +497,18 @@ public class CardEmulationManager
         @Override
         public boolean isDefaultServiceForCategory(
                 int userId, ComponentName service, String category) {
-            if (DBG)
+            if (DBG && (service != null))
                 Log.d(
                         TAG,
                         "CardEmulationInterface - isDefaultServiceForCategory() - service: "
                                 + service.flattenToString()
+                                + ", category: "
+                                + category);
+            else if (DBG)
+                Log.d(
+                        TAG,
+                        "CardEmulationInterface - isDefaultServiceForCategory() - service: "
+                                + "null"
                                 + ", category: "
                                 + category);
 
@@ -458,11 +524,18 @@ public class CardEmulationManager
         @Override
         public boolean isDefaultServiceForAid(int userId, ComponentName service, String aid)
                 throws RemoteException {
-            if (DBG)
+            if (DBG && (service != null))
                 Log.d(
                         TAG,
                         "CardEmulationInterface - isDefaultServiceForAid() - service: "
                                 + service.flattenToString()
+                                + ", aid: "
+                                + aid);
+            else if (DBG)
+                Log.d(
+                        TAG,
+                        "CardEmulationInterface - isDefaultServiceForAid() - service: "
+                                + "null"
                                 + ", aid: "
                                 + aid);
 
@@ -477,11 +550,18 @@ public class CardEmulationManager
         @Override
         public boolean setDefaultServiceForCategory(
                 int userId, ComponentName service, String category) throws RemoteException {
-            if (DBG)
+            if (DBG && (service != null))
                 Log.d(
                         TAG,
                         "CardEmulationInterface - setDefaultServiceForCategory() - service: "
                                 + service.flattenToString()
+                                + ", category: "
+                                + category);
+            else if (DBG)
+                Log.d(
+                        TAG,
+                        "CardEmulationInterface - setDefaultServiceForCategory() - service: "
+                                + "null"
                                 + ", category: "
                                 + category);
 
@@ -496,11 +576,13 @@ public class CardEmulationManager
         @Override
         public boolean setDefaultForNextTap(int userId, ComponentName service)
                 throws RemoteException {
-            if (DBG)
+            if (DBG && (service != null))
                 Log.d(
                         TAG,
                         "CardEmulationInterface - setDefaultForNextTap() - service: "
                                 + service.flattenToString());
+            else if (DBG)
+                Log.d(TAG, "CardEmulationInterface - setDefaultForNextTap() - service: " + "null");
 
             NfcPermissions.validateProfileId(mContext, userId);
             NfcPermissions.enforceAdminPermissions(mContext);
@@ -513,14 +595,18 @@ public class CardEmulationManager
         @Override
         public boolean registerAidGroupForService(
                 int userId, ComponentName service, AidGroup aidGroup) throws RemoteException {
-
-            if (DBG)
+            if (DBG) {
+                String s = null;
+                String a = null;
+                if (service != null) s = service.flattenToString();
+                if (aidGroup != null) a = aidGroup.toString();
                 Log.d(
                         TAG,
                         "CardEmulationInterface - registerAidGroupForService() - service: "
-                                + service.flattenToString()
+                                + s
                                 + ", aidGroup: "
-                                + aidGroup.toString());
+                                + a);
+            }
 
             NfcPermissions.validateUserId(userId);
             NfcPermissions.enforceUserPermissions(mContext);
@@ -538,11 +624,18 @@ public class CardEmulationManager
 
         @Override
         public boolean setOffHostForService(int userId, ComponentName service, String offHostSE) {
-            if (DBG)
+            if (DBG && (service != null))
                 Log.d(
                         TAG,
                         "CardEmulationInterface - setOffHostForService() - service: "
                                 + service.flattenToString()
+                                + ", offHostSE: "
+                                + offHostSE);
+            else if (DBG)
+                Log.d(
+                        TAG,
+                        "CardEmulationInterface - setOffHostForService() - service: "
+                                + "null"
                                 + ", offHostSE: "
                                 + offHostSE);
 
@@ -562,11 +655,15 @@ public class CardEmulationManager
 
         @Override
         public boolean unsetOffHostForService(int userId, ComponentName service) {
-            if (DBG)
+            if (DBG && (service != null))
                 Log.d(
                         TAG,
                         "CardEmulationInterface - unsetOffHostForService() - service: "
                                 + service.flattenToString());
+            else if (DBG)
+                Log.d(
+                        TAG,
+                        "CardEmulationInterface - unsetOffHostForService() - service: " + "null");
 
             NfcPermissions.validateUserId(userId);
             NfcPermissions.enforceUserPermissions(mContext);
@@ -584,12 +681,18 @@ public class CardEmulationManager
         @Override
         public AidGroup getAidGroupForService(int userId, ComponentName service, String category)
                 throws RemoteException {
-
-            if (DBG)
+            if (DBG && (service != null))
                 Log.d(
                         TAG,
                         "CardEmulationInterface - getAidGroupForService() - service: "
                                 + service.flattenToString()
+                                + ", category: "
+                                + category);
+            else if (DBG)
+                Log.d(
+                        TAG,
+                        "CardEmulationInterface - getAidGroupForService() - service: "
+                                + "null"
                                 + ", category: "
                                 + category);
 
@@ -607,11 +710,18 @@ public class CardEmulationManager
         @Override
         public boolean removeAidGroupForService(int userId, ComponentName service, String category)
                 throws RemoteException {
-            if (DBG)
+            if (DBG && (service != null))
                 Log.d(
                         TAG,
                         "CardEmulationInterface - removeAidGroupForService() - service: "
                                 + service.flattenToString()
+                                + ", category: "
+                                + category);
+            else if (DBG)
+                Log.d(
+                        TAG,
+                        "CardEmulationInterface - removeAidGroupForService() - service: "
+                                + "null"
                                 + ", category: "
                                 + category);
 
@@ -632,8 +742,6 @@ public class CardEmulationManager
         @Override
         public List<ApduServiceInfo> getServices(int userId, String category)
                 throws RemoteException {
-            if (DBG) Log.d(TAG, "CardEmulationInterface - getServices()");
-
             NfcPermissions.validateProfileId(mContext, userId);
             NfcPermissions.enforceAdminPermissions(mContext);
             List<StApduServiceInfo> stApduServices =
@@ -643,17 +751,20 @@ public class CardEmulationManager
                 ApduServiceInfo apduService = stApdu.createApduServiceInfo();
                 apduServices.add(apduService);
             }
-            if (DBG) Log.d(TAG, "getServices() size: " + apduServices.size());
+            if (DBG)
+                Log.d(TAG, "CardEmulationInterface - getServices() size: " + apduServices.size());
             return apduServices;
         }
 
         @Override
         public boolean setPreferredService(ComponentName service) throws RemoteException {
-            if (DBG)
+            if (DBG && (service != null))
                 Log.d(
                         TAG,
                         "CardEmulationInterface - setPreferredService() - service: "
                                 + service.flattenToString());
+            else if (DBG)
+                Log.d(TAG, "CardEmulationInterface - setPreferredService() - service: " + "null");
 
             NfcPermissions.enforceUserPermissions(mContext);
             if (!isServiceRegistered(UserHandle.getCallingUserId(), service)) {
@@ -685,9 +796,9 @@ public class CardEmulationManager
             NfcPermissions.validateUserId(userId);
             NfcPermissions.enforceUserPermissions(mContext);
             NfcPermissions.enforcePreferredPaymentInfoPermissions(mContext);
-            return mServiceCache
-                    .getStService(userId, mAidCache.getPreferredService())
-                    .createApduServiceInfo();
+            StApduServiceInfo stService =
+                    mServiceCache.getStService(userId, mAidCache.getPreferredService());
+            return (stService != null) ? stService.createApduServiceInfo() : null;
         }
 
         @Override

@@ -35,6 +35,9 @@
 #include "StHciEventManager.h"
 #include "JavaClassConstants.h"
 #include "NfcAdaptation.h"
+#ifdef DTA_ENABLED
+#include "NfcDta.h"
+#endif /* DTA_ENABLED */
 #include "StNfcJni.h"
 #include "StNfcTag.h"
 #include "PeerToPeer.h"
@@ -47,6 +50,7 @@
 #include "nfc_config.h"
 
 #include "ce_api.h"
+#include "debug_lmrt.h"
 #include "nfa_api.h"
 #include "nfa_ee_api.h"
 #include "nfa_p2p_api.h"
@@ -182,13 +186,13 @@ SyncEvent gIsReconfiguringDiscovery;
 
 namespace android {
 static jint sLastError = ERROR_BUFFER_TOO_SMALL;
-static SyncEvent sNfaEnableEvent;                // event for NFA_Enable()
-static SyncEvent sNfaDisableEvent;               // event for NFA_Disable()
+SyncEvent sNfaEnableEvent;   // event for NFA_Enable()
+SyncEvent sNfaDisableEvent;  // event for NFA_Disable()
 static SyncEvent sNfaEnableDisablePollingEvent;  // event for
                                                  // NFA_EnablePolling(),
                                                  // NFA_DisablePolling()
-static SyncEvent sNfaSetConfigEvent;             // event for Set_Config....
-static SyncEvent sNfaGetConfigEvent;             // event for Get_Config....
+SyncEvent gNfaSetConfigEvent;                    // event for Set_Config....
+SyncEvent gNfaGetConfigEvent;                    // event for Get_Config....
 static SyncEvent stimer;  // timer to try to enable again  NFA_Enable()
 static bool sIsNfaEnabled = false;
 static bool sDiscoveryEnabled = false;  // is polling or listening
@@ -222,9 +226,8 @@ static jint sWalletTechIsMute = -1;
 #define DEFAULT_ENABLE_TIMER 5000;
 static uint16_t ENABLE_TIMER;
 
-static void nfaConnectionCallback(uint8_t event, tNFA_CONN_EVT_DATA* eventData);
-static void nfaDeviceManagementCallback(uint8_t event,
-                                        tNFA_DM_CBACK_DATA* eventData);
+void nfaConnectionCallback(uint8_t event, tNFA_CONN_EVT_DATA* eventData);
+void nfaDeviceManagementCallback(uint8_t event, tNFA_DM_CBACK_DATA* eventData);
 static bool isPeerToPeer(tNFA_ACTIVATED& activated);
 static bool isListenMode(tNFA_ACTIVATED& activated);
 static tNFA_STATUS stopPolling_rfDiscoveryDisabled();
@@ -245,11 +248,12 @@ void reconfigure_poll_cb(union sigval);
 void clear_multiprotocol();
 void multiprotocol_clear_flag(union sigval);
 
-static uint16_t sCurrentConfigLen;
-static uint8_t sConfig[256];
+uint16_t gCurrentConfigLen;
+uint8_t gConfig[256];
 static int prevScreenState = NFA_SCREEN_STATE_UNKNOWN;
 static int NFA_SCREEN_POLLING_TAG_MASK = 0x10;
-static bool gIsDtaEnabled = false;
+bool gIsDtaEnabled = false;
+static void doDtaStartupConfig(tHAL_NFC_ENTRY*);
 
 /* Variables for MIFARE + ISO tag */
 static int isoMifareBitmap = 0x00;
@@ -263,6 +267,8 @@ static int isoMifareUid[10];
 static bool gEnableSkipMifare;
 
 static void (*rawRfCb)(uint8_t, tNFA_CONN_EVT_DATA*);
+
+Mutex gMutexConfig;
 
 /////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////
@@ -504,12 +510,23 @@ static void handleRfDiscoveryEvent(tNFC_RESULT_DEVT* discoveredDevice) {
 void* p2p_prio_logic_multiprotocol(void* arg) {
   tNFA_STATUS status = NFA_STATUS_FAILED;
   tNFA_TECHNOLOGY_MASK tech_mask = 0x00;
+  bool wasStopped = false;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
   gIsReconfiguringDiscovery.start();
+
+  if (sIsDisabling || !sIsNfaEnabled) {
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; Disabling, do not execute", __func__);
+    gIsReconfiguringDiscovery.end();
+    return NULL;
+  } else {
+    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
+  }
+
   /* Stop polling */
   if (sRfEnabled) {
     startRfDiscovery(false);
+    wasStopped = true;
   }
 
   {
@@ -532,6 +549,12 @@ void* p2p_prio_logic_multiprotocol(void* arg) {
 
     tech_mask =
         NfcConfig::getUnsigned(NAME_POLLING_TECH_MASK, DEFAULT_TECH_MASK);
+    if (gIsDtaEnabled == true) {
+      tech_mask &= ~NFA_TECHNOLOGY_MASK_ACTIVE;
+      DLOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s; tag polling tech mask=0x%X for DTA SNEP testing",
+                          __func__, tech_mask);
+    }
   }
 
   {
@@ -548,7 +571,7 @@ void* p2p_prio_logic_multiprotocol(void* arg) {
   }
 
   /* start polling */
-  if (!sRfEnabled) {
+  if (wasStopped) {
     startRfDiscovery(true);
   }
   gIsReconfiguringDiscovery.end();
@@ -677,8 +700,7 @@ static void nfcManager_isSkipMifareInterface() {
 ** Returns:         None
 **
 *******************************************************************************/
-static void nfaConnectionCallback(uint8_t connEvent,
-                                  tNFA_CONN_EVT_DATA* eventData) {
+void nfaConnectionCallback(uint8_t connEvent, tNFA_CONN_EVT_DATA* eventData) {
   tNFA_STATUS status = NFA_STATUS_FAILED;
   static uint8_t prev_more_val = 0x00;
   uint8_t cur_more_val = 0x00;
@@ -955,9 +977,11 @@ static void nfaConnectionCallback(uint8_t connEvent,
             uint8_t nfa_disable_rf_events[] = {0x00};
             DLOG_IF(INFO, nfc_debug_enabled)
                 << StringPrintf("%s; Disabling RF field events", __func__);
+            gMutexConfig.lock();
             status = NFA_SetConfig(NCI_PARAM_ID_RF_FIELD_INFO,
                                    sizeof(nfa_disable_rf_events),
                                    &nfa_disable_rf_events[0]);
+            gMutexConfig.unlock();
             if (status == NFA_STATUS_OK) {
               DLOG_IF(INFO, nfc_debug_enabled)
                   << StringPrintf("%s; Disabled RF field events", __func__);
@@ -1085,9 +1109,11 @@ static void nfaConnectionCallback(uint8_t connEvent,
               if (!sIsDisabling && sIsNfaEnabled) {
                 DLOG_IF(INFO, nfc_debug_enabled)
                     << StringPrintf("%s; Enabling RF field events", __func__);
+                gMutexConfig.lock();
                 status = NFA_SetConfig(NCI_PARAM_ID_RF_FIELD_INFO,
                                        sizeof(nfa_enable_rf_events),
                                        &nfa_enable_rf_events[0]);
+                gMutexConfig.unlock();
                 if (status == NFA_STATUS_OK) {
                   DLOG_IF(INFO, nfc_debug_enabled)
                       << StringPrintf("%s; Enabled RF field events", __func__);
@@ -1454,8 +1480,8 @@ void nfaDeviceManagementCallback(uint8_t dmEvent,
       DLOG_IF(INFO, nfc_debug_enabled)
           << StringPrintf("%s; NFA_DM_SET_CONFIG_EVT", __func__);
       {
-        SyncEventGuard guard(sNfaSetConfigEvent);
-        sNfaSetConfigEvent.notifyOne();
+        SyncEventGuard guard(gNfaSetConfigEvent);
+        gNfaSetConfigEvent.notifyOne();
         NfcStExtensions::getInstance().notifyNciConfigCompletion(false, 0,
                                                                  NULL);
       }
@@ -1465,19 +1491,19 @@ void nfaDeviceManagementCallback(uint8_t dmEvent,
       DLOG_IF(INFO, nfc_debug_enabled)
           << StringPrintf("%s; NFA_DM_GET_CONFIG_EVT", __func__);
       {
-        SyncEventGuard guard(sNfaGetConfigEvent);
+        SyncEventGuard guard(gNfaGetConfigEvent);
         if (eventData->status == NFA_STATUS_OK &&
-            eventData->get_config.tlv_size <= sizeof(sConfig)) {
-          sCurrentConfigLen = eventData->get_config.tlv_size;
-          memcpy(sConfig, eventData->get_config.param_tlvs,
+            eventData->get_config.tlv_size <= sizeof(gConfig)) {
+          gCurrentConfigLen = eventData->get_config.tlv_size;
+          memcpy(gConfig, eventData->get_config.param_tlvs,
                  eventData->get_config.tlv_size);
         } else {
           LOG(ERROR) << StringPrintf("%s; NFA_DM_GET_CONFIG failed", __func__);
-          sCurrentConfigLen = 0;
+          gCurrentConfigLen = 0;
         }
-        sNfaGetConfigEvent.notifyOne();
+        gNfaGetConfigEvent.notifyOne();
         NfcStExtensions::getInstance().notifyNciConfigCompletion(
-            true, sCurrentConfigLen, sConfig);
+            true, gCurrentConfigLen, gConfig);
       }
       break;
 
@@ -1544,12 +1570,12 @@ void nfaDeviceManagementCallback(uint8_t dmEvent,
           sNfaSetPowerSubState.notifyOne();
         }
         {
-          SyncEventGuard guard(sNfaSetConfigEvent);
-          sNfaSetConfigEvent.notifyOne();
+          SyncEventGuard guard(gNfaSetConfigEvent);
+          gNfaSetConfigEvent.notifyOne();
         }
         {
-          SyncEventGuard guard(sNfaGetConfigEvent);
-          sNfaGetConfigEvent.notifyOne();
+          SyncEventGuard guard(gNfaGetConfigEvent);
+          gNfaGetConfigEvent.notifyOne();
         }
       } else {
         nativeNfcTag_abortWaits();
@@ -1827,6 +1853,7 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
   initializeGlobalDebugEnabledFlag();
   tNFA_STATUS stat = NFA_STATUS_OK;
   sIsRecovering = false;
+  tHAL_NFC_ENTRY* halFuncEntries;
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
 
   PowerSwitch& powerSwitch = PowerSwitch::getInstance();
@@ -1847,8 +1874,7 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
 
     {
       SyncEventGuard guard(sNfaEnableEvent);
-      tHAL_NFC_ENTRY* halFuncEntries = theInstance.GetHalEntryFuncs();
-
+      halFuncEntries = theInstance.GetHalEntryFuncs();
       NFA_Init(halFuncEntries);
 
       stat = NFA_Enable(nfaDeviceManagementCallback, nfaConnectionCallback);
@@ -1878,6 +1904,19 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
     if (stat == NFA_STATUS_OK) {
       // sIsNfaEnabled indicates whether stack started successfully
       if (sIsNfaEnabled) {
+        // To be done before NfcStExtensions and PeerToPeer call to
+        // initialize()
+        if (gIsDtaEnabled == true) {
+          struct nfc_jni_native_data* nat = getNative(e, o);
+          nat->tech_mask =
+              NfcConfig::getUnsigned(NAME_POLLING_TECH_MASK, DEFAULT_TECH_MASK);
+          nat->tech_mask &= ~NFA_TECHNOLOGY_MASK_ACTIVE;
+          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+              "%s; tag polling tech mask=0x%X for DTA SNEP testing", __func__,
+              nat->tech_mask);
+
+          doDtaStartupConfig(halFuncEntries);
+        }
         StSecureElement::getInstance().initialize(getNative(e, o));
         StCardEmulationEmbedded::getInstance().initialize(getNative(e, o));
         sRoutingInitialized =
@@ -1899,17 +1938,20 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
         if (gIsDtaEnabled == true) {
           uint8_t configData = 0;
           configData = 0x01; /* Poll NFC-DEP : Highest Available Bit Rates */
+          gMutexConfig.lock();
           NFA_SetConfig(NCI_PARAM_ID_BITR_NFC_DEP, sizeof(uint8_t),
                         &configData);
+          gMutexConfig.unlock();
         }
 
         struct nfc_jni_native_data* nat = getNative(e, o);
-        if (nat) {
-          nat->tech_mask =
-              NfcConfig::getUnsigned(NAME_POLLING_TECH_MASK, DEFAULT_TECH_MASK);
-          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-              "%s; tag polling tech mask=0x%X", __func__, nat->tech_mask);
-        }
+        if (gIsDtaEnabled == false)
+          if (nat) {
+            nat->tech_mask = NfcConfig::getUnsigned(NAME_POLLING_TECH_MASK,
+                                                    DEFAULT_TECH_MASK);
+            DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+                "%s; tag polling tech mask=0x%X", __func__, nat->tech_mask);
+          }
 
         // if this value exists, set polling interval.
         nat->discovery_duration = NfcConfig::getUnsigned(
@@ -1919,16 +1961,16 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
 
         // get LF_T3T_MAX
         {
-          SyncEventGuard guard(sNfaGetConfigEvent);
+          SyncEventGuard guard(gNfaGetConfigEvent);
           tNFA_PMID configParam[1] = {NCI_PARAM_ID_LF_T3T_MAX};
           stat = NFA_GetConfig(1, configParam);
           if (stat == NFA_STATUS_OK) {
-            sNfaGetConfigEvent.wait();
-            if (sCurrentConfigLen >= 4 ||
-                sConfig[1] == NCI_PARAM_ID_LF_T3T_MAX) {
+            gNfaGetConfigEvent.wait();
+            if (gCurrentConfigLen >= 4 ||
+                gConfig[1] == NCI_PARAM_ID_LF_T3T_MAX) {
               DLOG_IF(INFO, nfc_debug_enabled)
-                  << StringPrintf("%s; lfT3tMax=%d", __func__, sConfig[3]);
-              sLfT3tMax = sConfig[3];
+                  << StringPrintf("%s: lfT3tMax=%d", __func__, gConfig[3]);
+              sLfT3tMax = gConfig[3];
             }
           }
         }
@@ -1944,6 +1986,9 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
 
         // Do custom NFCA startup configuration.
         doStartupConfig();
+#ifdef DTA_ENABLED
+        NfcDta::getInstance().setNfccConfigParams();
+#endif /* DTA_ENABLED */
         goto TheEnd;
       }
     }
@@ -2050,8 +2095,10 @@ static void stNfcManager_configFieldNtfs(bool flag) {
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
       "%s; Enabling/Disabling RF field events (%d)", __func__, flag);
 
+  gMutexConfig.lock();
   tNFA_STATUS status = NFA_SetConfig(NCI_PARAM_ID_RF_FIELD_INFO,
                                      sizeof(nfa_rf_events), &nfa_rf_events[0]);
+  gMutexConfig.unlock();
   if (status != NFA_STATUS_OK) {
     LOG(ERROR) << StringPrintf("%s; Failed to update RF field events",
                                __func__);
@@ -2078,7 +2125,8 @@ static void stNfcManager_configNfccConfigControl(bool flag) {
 
     gNfccConfigControlStatus = flag;
 
-    SyncEventGuard guard(sNfaSetConfigEvent);
+    gMutexConfig.lock();
+    SyncEventGuard guard(gNfaSetConfigEvent);
 
     tNFA_STATUS status =
         NFA_SetConfig(NCI_PARAM_ID_NFCC_CONFIG_CONTROL, sizeof(nfa_set_config),
@@ -2087,8 +2135,9 @@ static void stNfcManager_configNfccConfigControl(bool flag) {
     if (status != NFA_STATUS_OK) {
       LOG(ERROR) << __func__ << ": Failed to configure NFCC_CONFIG_CONTROL";
     } else {
-      sNfaSetConfigEvent.wait();
+      gNfaSetConfigEvent.wait();
     }
+    gMutexConfig.unlock();
   }
 }
 
@@ -2399,7 +2448,11 @@ static jint stNfcManager_doGetLastError(JNIEnv*, jobject) {
 static jboolean stNfcManager_doDeinitialize(JNIEnv*, jobject) {
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
 
+  // Added mutext to protect variable for cases where
+  // p2p_prio_logic_multiprotocol might launch
+  gIsReconfiguringDiscovery.start();
   sIsDisabling = true;
+  gIsReconfiguringDiscovery.end();
 
   if (!recovery_option || !sIsRecovering) {
     StRoutingManager::getInstance().onNfccShutdown();
@@ -2421,7 +2474,11 @@ static jboolean stNfcManager_doDeinitialize(JNIEnv*, jobject) {
     if (stat == NFA_STATUS_OK) {
       DLOG_IF(INFO, nfc_debug_enabled)
           << StringPrintf("%s; wait for completion", __func__);
-      sNfaDisableEvent.wait();  // wait for NFA command to finish
+      // wait for NFA command to finish
+      if (!sNfaDisableEvent.wait(5000)) {
+        LOG(ERROR) << StringPrintf(
+            "%s; NFA_Disable() timeout, keep disabling anyway", __func__);
+      }
       PeerToPeer::getInstance().handleNfcOnOff(false);
     } else {
       LOG(ERROR) << StringPrintf("%s; fail disable; error=0x%X", __func__,
@@ -2689,9 +2746,11 @@ static jboolean nfcManager_setForceSAK(JNIEnv* e, jobject o, jboolean enabled,
     wasStopped = true;
   }
 
+  gMutexConfig.lock();
   tNFA_STATUS status = NFA_SetConfig(
       NCI_PARAM_ID_PROP_TEMPORARY_FORCED_SAK,
       (enabled == JNI_TRUE ? sizeof(force_sak) : 0x00), &force_sak[0]);
+  gMutexConfig.unlock();
 
   if (wasStopped) {
     // start discovery
@@ -3163,14 +3222,17 @@ static void stNfcManager_doSetScreenState(JNIEnv* e, jobject o,
         NCI_LISTEN_DH_NFCEE_ENABLE_MASK | NCI_POLLING_DH_ENABLE_MASK;
   }
 
-  SyncEventGuard guard(sNfaSetConfigEvent);
+  gMutexConfig.lock();
+  SyncEventGuard guard(gNfaSetConfigEvent);
   status = NFA_SetConfig(NCI_PARAM_ID_CON_DISCOVERY_PARAM,
                          NCI_PARAM_LEN_CON_DISCOVERY_PARAM, &discovry_param);
   if (status == NFA_STATUS_OK) {
-    sNfaSetConfigEvent.wait();
+    gNfaSetConfigEvent.wait();
+    gMutexConfig.unlock();
   } else {
     LOG(ERROR) << StringPrintf("%s; Failed to update CON_DISCOVER_PARAM",
                                __FUNCTION__);
+    gMutexConfig.unlock();
     return;
   }
 
@@ -3522,6 +3584,21 @@ void stNfcManager_doSetNfceePowerAndLinkCtrl(JNIEnv* e, jobject o,
 
 /*******************************************************************************
 **
+** Function:        nfcManager_doGetMaxRoutingTableSize
+**
+** Description:     Retrieve the max routing table size from cache
+**                  e: JVM environment.
+**                  o: Java object.
+**
+** Returns:         Max Routing Table size
+**
+*******************************************************************************/
+static jint nfcManager_doGetMaxRoutingTableSize(JNIEnv* e, jobject o) {
+  return lmrt_get_max_size();
+}
+
+/*******************************************************************************
+**
 ** Function:        nfcManager_enablePollingLoopSpy
 **
 ** Description:     Enable or disable the collection of POS polling loop
@@ -3534,6 +3611,29 @@ void stNfcManager_doSetNfceePowerAndLinkCtrl(JNIEnv* e, jobject o,
 static void nfcManager_enablePollingLoopSpy(JNIEnv* e, jobject o,
                                             jboolean enabled) {
   NfcStExtensions::getInstance().stPollingLoopSpyManagerEnable(enabled);
+}
+
+/*******************************************************************************
+**
+** Function:        nfcManager_doGetRoutingTable
+**
+** Description:     Retrieve the committed listen mode routing configuration
+**                  e: JVM environment.
+**                  o: Java object.
+**
+** Returns:         Committed listen mode routing configuration
+**
+*******************************************************************************/
+static jbyteArray nfcManager_doGetRoutingTable(JNIEnv* e, jobject o) {
+  std::vector<uint8_t>* routingTable = lmrt_get_tlvs();
+
+  CHECK(e);
+  jbyteArray rtJavaArray = e->NewByteArray((*routingTable).size());
+  CHECK(rtJavaArray);
+  e->SetByteArrayRegion(rtJavaArray, 0, (*routingTable).size(),
+                        (jbyte*)&(*routingTable)[0]);
+
+  return rtJavaArray;
 }
 
 /*****************************************************************************
@@ -3648,6 +3748,9 @@ static JNINativeMethod gMethods[] = {
      (void*)nfcManager_doGetNfaStorageDir},
     {"doSetNfceePowerAndLinkCtrl", "(Z)V",
      (void*)stNfcManager_doSetNfceePowerAndLinkCtrl},
+    {"getRoutingTable", "()[B", (void*)nfcManager_doGetRoutingTable},
+    {"getMaxRoutingTableSize", "()I",
+     (void*)nfcManager_doGetMaxRoutingTableSize},
     {"enableIntfActivatedNtf", "(Z)V",
      (void*)nfcManager_enableIntfActivatedNtf},
     {"enablePollingLoopSpy", "(Z)V", (void*)nfcManager_enablePollingLoopSpy},
@@ -3786,10 +3889,12 @@ void doStartupConfig() {
 
     DLOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s; Configure RF_FIELD_INFO event", __func__);
-    SyncEventGuard guard(sNfaSetConfigEvent);
+    gMutexConfig.lock();
+    SyncEventGuard guard(gNfaSetConfigEvent);
     tNFA_STATUS status = NFA_SetConfig(
         NCI_PARAM_ID_RF_FIELD_INFO, sizeof(nfa_field_info), &nfa_field_info[0]);
-    if (status == NFA_STATUS_OK) sNfaSetConfigEvent.wait();
+    if (status == NFA_STATUS_OK) gNfaSetConfigEvent.wait();
+    gMutexConfig.unlock();
   }
 
   // configure NFCC_CONFIG_CONTROL- NFCC allowed to manage RF configuration.
@@ -3825,7 +3930,7 @@ void startStopPolling(bool isStartPolling) {
       << StringPrintf("%s; enter; isStart=%u", __func__, isStartPolling);
 
   if (NFC_GetNCIVersion() >= NCI_VERSION_2_0) {
-    SyncEventGuard guard(sNfaSetConfigEvent);
+    SyncEventGuard guard(gNfaSetConfigEvent);
     if (isStartPolling) {
       discovry_param =
           NCI_LISTEN_DH_NFCEE_ENABLE_MASK | NCI_POLLING_DH_ENABLE_MASK;
@@ -3833,14 +3938,17 @@ void startStopPolling(bool isStartPolling) {
       discovry_param =
           NCI_LISTEN_DH_NFCEE_ENABLE_MASK | NCI_POLLING_DH_DISABLE_MASK;
     }
+
+    gMutexConfig.lock();
     status = NFA_SetConfig(NCI_PARAM_ID_CON_DISCOVERY_PARAM,
                            NCI_PARAM_LEN_CON_DISCOVERY_PARAM, &discovry_param);
     if (status == NFA_STATUS_OK) {
-      sNfaSetConfigEvent.wait();
+      gNfaSetConfigEvent.wait();
     } else {
       LOG(ERROR) << StringPrintf("%s; Failed to update CON_DISCOVER_PARAM",
                                  __FUNCTION__);
     }
+    gMutexConfig.unlock();
   } else {
     gIsReconfiguringDiscovery.start();
     startRfDiscovery(false);
@@ -3874,6 +3982,13 @@ static tNFA_STATUS startPolling_rfDiscoveryDisabled(
   if (tech_mask == 0)
     tech_mask =
         NfcConfig::getUnsigned(NAME_POLLING_TECH_MASK, DEFAULT_TECH_MASK);
+
+  if (gIsDtaEnabled == true) {
+    tech_mask &= ~NFA_TECHNOLOGY_MASK_ACTIVE;
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; tag polling tech mask=0x%X for DTA SNEP testing",
+                        __func__, tech_mask);
+  }
 
   nativeNfcTag_acquireRfInterfaceMutexLock();
   SyncEventGuard guard(sNfaEnableDisablePollingEvent);
@@ -3946,12 +4061,15 @@ void setNciConfig(int param_id, uint8_t* param, int length) {
     startRfDiscovery(false);
   }
 
-  SyncEventGuard guard(sNfaSetConfigEvent);
+  gMutexConfig.lock();
+  SyncEventGuard guard(gNfaSetConfigEvent);
   stat = NFA_SetConfig(param_id, length, param);
   if (stat == NFA_STATUS_OK)
-    sNfaSetConfigEvent.wait();
+    gNfaSetConfigEvent.wait();
   else
     LOG(ERROR) << StringPrintf("%s; Could not configure NCI param", __func__);
+
+  gMutexConfig.unlock();
 
   if (rfEnabled) {
     // Stop RF discovery
@@ -3988,6 +4106,21 @@ void registerRawRfCallback(void (*cb)(uint8_t, tNFA_CONN_EVT_DATA*)) {
 void unRegisterRawRfCallback() {
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; cb=NULL", __func__);
   rawRfCb = NULL;
+}
+
+/*******************************************************************************
+**
+** Function:        doDtaStartupConfig
+**
+** Description:     Configure the NFC controller for DTA SNEP testing.
+**
+** Returns:         None
+**
+*******************************************************************************/
+static void doDtaStartupConfig(tHAL_NFC_ENTRY* halFuncEntries) {
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
+  NfcStExtensions::getInstance().setDtaConfig(halFuncEntries);
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", __func__);
 }
 
 } /* namespace android */

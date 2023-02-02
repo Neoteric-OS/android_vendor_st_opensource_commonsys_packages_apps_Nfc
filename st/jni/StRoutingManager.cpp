@@ -70,6 +70,7 @@ static const uint8_t AID_ROUTE_QUAL_PREFIX = 0x10;
 static IntervalTimer gTechReconfTimer;
 static tNFA_EE_DISCOVER_REQ gTempEeInfo;
 static Mutex sEeInfoMutex;
+static Mutex sEeInfoChangedMutex;
 
 /*******************************************************************************
 **
@@ -145,7 +146,11 @@ StRoutingManager::StRoutingManager()
   mNfcFOnDhHandle = NFA_HANDLE_INVALID;
 
   mDeinitializing = false;
+
+  sEeInfoChangedMutex.lock();
   mEeInfoChanged = true;
+  sEeInfoChangedMutex.unlock();
+
   mScRoutingConfigured = false;
 
   mUserDefaultOffHostRoute = 0;
@@ -327,7 +332,7 @@ void StRoutingManager::enableRoutingToHost() {
   int defaultFelicaRoute = getScTypeFRouting(ROUTING_TYPE_F);
 
   // Route Nfc-F to host if we don't have a SE
-  //  techMask = NFA_TECHNOLOGY_MASK_F;
+  techMask = NFA_TECHNOLOGY_MASK_F;
   //  if ((connectedDefaultFelicaRoute == NFC_DH_ID) &&
   //      ((mSeTechMask & NFA_TECHNOLOGY_MASK_F) == 0)) {
   if (defaultFelicaRoute == NFC_DH_ID) {
@@ -544,7 +549,11 @@ bool StRoutingManager::commitRouting() {
     return true;
   }
 
+  sEeInfoChangedMutex.lock();
   if (mEeInfoChanged) {
+    mEeInfoChanged = false;
+    sEeInfoChangedMutex.unlock();
+
     // Update verything as some NFCEE might have been connected/
     // disconnect
     NFA_EeClearRoutingTable(mScRoutingConfigured ? false : true);
@@ -554,8 +563,8 @@ bool StRoutingManager::commitRouting() {
     }
 
     updateFullRoutes();
-
-    mEeInfoChanged = false;
+  } else {
+    sEeInfoChangedMutex.unlock();
   }
 
   {
@@ -1438,7 +1447,7 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
   // Route Nfc-A to host if we don't have a SE
   tNFA_TECHNOLOGY_MASK techMask = NFA_TECHNOLOGY_MASK_A;
   if ((NfcStExtensions::HCE_TECH_MASK & NFA_TECHNOLOGY_MASK_A) &&
-      ((mSeTechMask & NFA_TECHNOLOGY_MASK_A) == 0)) {
+      ((allSeTechMask & NFA_TECHNOLOGY_MASK_A) == 0)) {
     nfaStat = NFA_EeSetDefaultTechRouting(
         NFC_DH_ID, techMask, 0, 0, mSecureNfcEnabled ? 0 : techMask, 0, 0);
     if (nfaStat == NFA_STATUS_OK)
@@ -1449,7 +1458,7 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
 
   techMask = NFA_TECHNOLOGY_MASK_B;
   if ((NfcStExtensions::HCE_TECH_MASK & NFA_TECHNOLOGY_MASK_B) &&
-      ((mSeTechMask & NFA_TECHNOLOGY_MASK_B) == 0)) {
+      ((allSeTechMask & NFA_TECHNOLOGY_MASK_B) == 0)) {
     nfaStat = NFA_EeSetDefaultTechRouting(
         NFC_DH_ID, techMask, 0, 0, mSecureNfcEnabled ? 0 : techMask, 0, 0);
     if (nfaStat == NFA_STATUS_OK)
@@ -1750,6 +1759,8 @@ void StRoutingManager::updateFullRoutes() {
         localEeInfo.ee_disc_info[i].lf_protocol,
         localEeInfo.ee_disc_info[i].lbp_protocol);
 
+    int nfceeFullmask = 0x00;
+
     /*** Mifare routing/Tech A ***/
     if ((connectedMifareRoute != INVALID_ROUTE_VALUE) &&
         (eeHandle == (connectedMifareRoute | NFA_HANDLE_GROUP_EE))) {
@@ -1762,10 +1773,27 @@ void StRoutingManager::updateFullRoutes() {
     if ((connectedDefaultOffHostRoute != 0) &&
         (eeHandle == (connectedDefaultOffHostRoute | NFA_HANDLE_GROUP_EE))) {
       // If MIFARE was not routed, and this
-      if ((localEeInfo.ee_disc_info[i].la_protocol != 0) && (seTechMask == 0))
+      if (localEeInfo.ee_disc_info[i].la_protocol != 0) {
         seTechMask |= NFA_TECHNOLOGY_MASK_A;
-      if (localEeInfo.ee_disc_info[i].lb_protocol != 0)
+
+        if ((localEeInfo.ee_disc_info[i].la_protocol & NFA_PROTOCOL_MASK_T2T) !=
+            0) {
+          nfceeFullmask = TECH_A_MIFARE;
+        }
+        if ((localEeInfo.ee_disc_info[i].la_protocol &
+             NFA_PROTOCOL_MASK_ISO_DEP) != 0) {
+          nfceeFullmask |= TECH_A_ISO_DEP;
+        }
+      }
+      if (localEeInfo.ee_disc_info[i].lb_protocol != 0) {
         seTechMask |= NFA_TECHNOLOGY_MASK_B;
+        nfceeFullmask |= TECH_B_ISO_DEP;
+      }
+
+      if (seTechMask == 0x00) {
+        // Tech A/B not supproted by target NFCEE, will be routed to HCE
+        connectedDefaultOffHostRoute = 0x00;
+      }
     }
 
     if ((felicaRoute != 0) && (felicaRoute != -1) &&
@@ -1815,6 +1843,38 @@ void StRoutingManager::updateFullRoutes() {
                         ((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_F) != 0));
       }
       muteTechSet = true;
+    }
+
+    /*** Special case: NFCEE only supports A for MIFARE protocol and B for
+       ISO-DEP
+        => remove type A for HCE in polling loop ***/
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; nfceeFullmask=0x%02x", fn, nfceeFullmask);
+
+    uint8_t config[NfcStExtensions::RF_CONFIG_ARRAY_SIZE];
+    int rfBitmap = NfcStExtensions::getInstance().getRfConfiguration(config);
+    bool isRfReconfNeeded = false;
+    // If HCE is enabled
+    if (rfBitmap & (0x1 << NfcStExtensions::CE_IDX)) {
+      if ((nfceeFullmask == (TECH_B_ISO_DEP | TECH_A_MIFARE)) ||
+          (nfceeFullmask == TECH_A_MIFARE)) {
+        // Need to remove type A from HCE, if not yet done
+        if ((config[NfcStExtensions::CE_IDX] & NFA_TECHNOLOGY_MASK_A) != 0) {
+          config[NfcStExtensions::CE_IDX] &= ~NFA_TECHNOLOGY_MASK_A;
+          isRfReconfNeeded = true;
+        }
+      } else if (((config[NfcStExtensions::CE_IDX] & NFA_TECHNOLOGY_MASK_A) ==
+                  0) &&
+                 ((NFA_TECHNOLOGY_MASK_A & NfcStExtensions::HCE_TECH_MASK) !=
+                  0)) {
+        // Need to restore type A in HCE if needed
+        config[NfcStExtensions::CE_IDX] |= NFA_TECHNOLOGY_MASK_A;
+        isRfReconfNeeded = true;
+      }
+    }
+
+    if (isRfReconfNeeded) {
+      NfcStExtensions::getInstance().setRfConfiguration(rfBitmap, config);
     }
   }
 
@@ -1916,7 +1976,10 @@ void StRoutingManager::processEmptyDiscRedNtf() {
   sEeInfoMutex.unlock();
 
   if (mReceivedEeInfo && !mDeinitializing) {
+    sEeInfoChangedMutex.lock();
     mEeInfoChanged = true;
+    sEeInfoChangedMutex.unlock();
+
     notifyEeUpdated();
   }
   mReceivedEeInfo = true;
@@ -2071,7 +2134,9 @@ void StRoutingManager::nfaEeCallback(tNFA_EE_EVT event,
       sEeInfoMutex.unlock();
 
       if (routingManager.mReceivedEeInfo && !routingManager.mDeinitializing) {
+        sEeInfoChangedMutex.lock();
         routingManager.mEeInfoChanged = true;
+        sEeInfoChangedMutex.unlock();
         routingManager.notifyEeUpdated();
       }
       routingManager.mReceivedEeInfo = true;
@@ -2221,7 +2286,9 @@ int StRoutingManager::registerT3tIdentifier(uint8_t* t3tId, uint8_t t3tIdLen) {
     }
 
     mScRoutingConfigured = true;
+    sEeInfoChangedMutex.lock();
     mEeInfoChanged = true;
+    sEeInfoChangedMutex.unlock();
 
     if ((nfaStat != NFA_STATUS_OK) || (mCbEventData.status != NFA_STATUS_OK)) {
       LOG(ERROR) << StringPrintf("%s; Fail to register system code on DH", fn);
@@ -2284,7 +2351,9 @@ void StRoutingManager::deregisterT3tIdentifier(int handle) {
         }
 
         mScRoutingConfigured = false;
+        sEeInfoChangedMutex.lock();
         mEeInfoChanged = true;
+        sEeInfoChangedMutex.unlock();
       }
     }
   }
@@ -2439,7 +2508,9 @@ void StRoutingManager::setUserDefaultRoutesPref(int mifareRoute,
 
   if (mIsInit == false) {
     // This is to force a full update
+    sEeInfoChangedMutex.lock();
     mEeInfoChanged = true;
+    sEeInfoChangedMutex.unlock();
   }
 
   mIsInit = false;

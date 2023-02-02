@@ -12,7 +12,7 @@ cc_library_shared {
     srcs: ["*.cpp"],
 
     shared_libs: [
-	"libicu",
+        "libicu",
         "libandroidicu",
         "libnativehelper",
         "libcutils",

@@ -396,8 +396,14 @@ class NfcDispatcher {
             }
         }
 
+        // if (DBG) {
+        //     if ((tag != null) && (message != null)) {
+        //         Log.d(TAG, "dispatchTag() - " + tag.toString() + " message: " + message);
+        //     }
+        // }
+
         if (DBG) {
-            if ((tag != null) && (message != null)) {
+            if (tag != null) {
                 Log.d(TAG, "dispatchTag() - " + tag.toString() + " message: " + message);
             }
         }

@@ -139,11 +139,15 @@ public class HostEmulationManager {
         new Handler(Looper.getMainLooper())
                 .post(
                         () -> {
-                            if (DBG)
+                            if (DBG && (service != null))
                                 Log.d(
                                         TAG,
                                         "onPreferredPaymentServiceChanged() - service: "
                                                 + service.flattenToString());
+                            else if (DBG)
+                                Log.d(
+                                        TAG,
+                                        "onPreferredPaymentServiceChanged() - service: " + "null");
 
                             synchronized (mLock) {
                                 if (service != null) {
@@ -157,11 +161,12 @@ public class HostEmulationManager {
 
     /** Preferred foreground service changed */
     public void onPreferredForegroundServiceChanged(int userId, ComponentName service) {
-        if (DBG)
+        if (DBG && (service != null))
             Log.d(
                     TAG,
                     "onPreferredForegroundServiceChanged() - service: "
                             + service.flattenToString());
+        else if (DBG) Log.d(TAG, "onPreferredForegroundServiceChanged() - service: " + "null");
 
         synchronized (mLock) {
             if (service != null) {
@@ -467,7 +472,9 @@ public class HostEmulationManager {
     }
 
     void bindPaymentServiceLocked(int userId, ComponentName service) {
-        if (DBG) Log.d(TAG, "bindPaymentServiceLocked() - service: " + service.flattenToString());
+        if (DBG && (service != null))
+            Log.d(TAG, "bindPaymentServiceLocked() - service: " + service.flattenToString());
+        else if (DBG) Log.d(TAG, "bindPaymentServiceLocked() - service: " + "null");
 
         unbindPaymentServiceLocked();
 
@@ -566,11 +573,16 @@ public class HostEmulationManager {
                 @Override
                 public void onServiceConnected(ComponentName name, IBinder service) {
 
-                    if (DBG)
+                    if (DBG && (name != null))
                         Log.d(
                                 TAG,
                                 "ServiceConnection(mPaymentConnection) - onServiceConnected() - name: "
                                         + name.flattenToString());
+                    else if (DBG)
+                        Log.d(
+                                TAG,
+                                "ServiceConnection(mPaymentConnection) - onServiceConnected() - name: "
+                                        + "null");
 
                     synchronized (mLock) {
                         /* Preferred Payment Service has been changed. */
@@ -584,11 +596,16 @@ public class HostEmulationManager {
 
                 @Override
                 public void onServiceDisconnected(ComponentName name) {
-                    if (DBG)
+                    if (DBG && (name != null))
                         Log.d(
                                 TAG,
                                 "ServiceConnection(mPaymentConnection) - onServiceDisconnected() - name: "
                                         + name.flattenToString());
+                    else if (DBG)
+                        Log.d(
+                                TAG,
+                                "ServiceConnection(mPaymentConnection) - onServiceDisconnected() - name: "
+                                        + "null");
 
                     synchronized (mLock) {
                         mPaymentService = null;
@@ -603,11 +620,16 @@ public class HostEmulationManager {
             new ServiceConnection() {
                 @Override
                 public void onServiceConnected(ComponentName name, IBinder service) {
-                    if (DBG)
+                    if (DBG && (name != null))
                         Log.d(
                                 TAG,
                                 "ServiceConnection(mConnection) - onServiceConnected() - name: "
                                         + name.flattenToString());
+                    else if (DBG)
+                        Log.d(
+                                TAG,
+                                "ServiceConnection(mConnection) - onServiceConnected() - name: "
+                                        + "null");
 
                     synchronized (mLock) {
                         /* Service is already deactivated, don't bind */
@@ -631,11 +653,16 @@ public class HostEmulationManager {
 
                 @Override
                 public void onServiceDisconnected(ComponentName name) {
-                    if (DBG)
+                    if (DBG && (name != null))
                         Log.d(
                                 TAG,
                                 "ServiceConnection(mConnection) - onServiceDisconnected() - name: "
                                         + name.flattenToString());
+                    else if (DBG)
+                        Log.d(
+                                TAG,
+                                "ServiceConnection(mConnection) - onServiceDisconnected() - name: "
+                                        + "null");
 
                     synchronized (mLock) {
                         Log.d(

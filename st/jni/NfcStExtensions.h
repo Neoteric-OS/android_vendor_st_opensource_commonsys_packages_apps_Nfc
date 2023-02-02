@@ -686,7 +686,7 @@ class NfcStExtensions {
                            uint8_t* p_data);
 
   static void StRestartCallback();
-  void notifyRestart();
+  void notifyRestart(bool ese_reset, bool ese_syncid);
 
   /*******************************************************************************
    **
@@ -787,6 +787,8 @@ class NfcStExtensions {
 
   bool setObserverMode(bool enable);
   bool getObserverMode();
+
+  void setDtaConfig(tHAL_NFC_ENTRY*);
 
  private:
   static const uint8_t OID_ST_VS_CMD = 0x2;
@@ -999,6 +1001,12 @@ class NfcStExtensions {
                                      // on, and when go to field off.
   pthread_t mStClfFieldMonitorThread;
   static void* StClfFieldMonitorWorker(NfcStExtensions* inst);
+
+  // WA to check if eSE ignored a CLT frame and restart so we are not stuck.
+  void StCltMuteMonitor(uint8_t format, uint16_t data_len, uint8_t* p_data,
+                        bool last);
+  bool mSwpCltSent;
+  static void* StCltMuteMonitorWorker(NfcStExtensions* inst);
 
   // Constants for SetMuteTech
 #define ST_CE_MUTE_A 1

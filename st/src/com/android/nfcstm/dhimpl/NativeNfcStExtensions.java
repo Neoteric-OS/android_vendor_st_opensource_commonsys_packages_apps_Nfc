@@ -113,4 +113,6 @@ public class NativeNfcStExtensions {
     public native boolean rawRfMode(boolean enable);
 
     public native byte[] rawJniSeq(int i, byte[] ba);
+
+    public native int checkNdefNfceeAvailable();
 }
