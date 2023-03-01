@@ -74,7 +74,6 @@ import android.content.res.Resources.NotFoundException;
 import android.media.AudioAttributes;
 import android.media.SoundPool;
 import android.net.Uri;
-import android.nfc.BeamShareData;
 import android.nfc.cardemulation.CardEmulation;
 import android.nfc.ErrorCodes;
 import android.nfc.FormatException;
@@ -2579,14 +2578,12 @@ public class NfcService implements DeviceHostListener {
             }
         }
 
-        @Override
         public boolean isNdefPushEnabled() throws RemoteException {
             synchronized (NfcService.this) {
                 return mState == NfcAdapter.STATE_ON && mIsNdefPushEnabled;
             }
         }
 
-        @Override
         public boolean enableNdefPush() throws RemoteException {
             NfcPermissions.enforceAdminPermissions(mContext);
             synchronized (NfcService.this) {
@@ -2661,7 +2658,6 @@ public class NfcService implements DeviceHostListener {
             return true;
         }
 
-        @Override
         public boolean disableNdefPush() throws RemoteException {
             NfcPermissions.enforceAdminPermissions(mContext);
             synchronized (NfcService.this) {
@@ -2780,7 +2776,6 @@ public class NfcService implements DeviceHostListener {
             NfcPermissions.enforceUserPermissions(mContext);
         }
 
-        @Override
         public void invokeBeam() {
             if (!mIsBeamCapable) {
                 return;
@@ -2788,12 +2783,12 @@ public class NfcService implements DeviceHostListener {
             NfcPermissions.enforceUserPermissions(mContext);
 
             if (mForegroundUtils.isInForeground(Binder.getCallingUid())) {
-                mP2pLinkManager.onManualBeamInvoke(null);
+                //mP2pLinkManager.onManualBeamInvoke(null);
             } else {
                 Log.e(TAG, "Calling activity not in foreground.");
             }
         }
-
+       /*
         @Override
         public void invokeBeamInternal(BeamShareData shareData) {
             NfcPermissions.enforceAdminPermissions(mContext);
@@ -2820,7 +2815,7 @@ public class NfcService implements DeviceHostListener {
             //    way to do this right now without additional framework changes.
             mHandler.sendMessageDelayed(msg, INVOKE_BEAM_DELAY_MS);
         }
-
+       */
         @Override
         public INfcTag getNfcTagInterface() throws RemoteException {
             return mNfcTagService;
@@ -2862,7 +2857,6 @@ public class NfcService implements DeviceHostListener {
             mNfcDispatcher.dispatchTag(tag);
         }
 
-        @Override
         public void setP2pModes(int initiatorModes, int targetModes) throws RemoteException {
             NfcPermissions.enforceAdminPermissions(mContext);
             mDeviceHost.setP2pInitiatorModes(initiatorModes);
@@ -6304,7 +6298,7 @@ public class NfcService implements DeviceHostListener {
                 case MSG_INVOKE_BEAM:
                     {
                         try {
-                            mP2pLinkManager.onManualBeamInvoke((BeamShareData) msg.obj);
+                            //mP2pLinkManager.onManualBeamInvoke((BeamShareData) msg.obj);
                         } catch (Exception e){
                             Log.e(TAG, "NFCSTM Invalid Beam Content received.");
                         }

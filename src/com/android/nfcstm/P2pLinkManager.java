@@ -23,7 +23,6 @@ import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.UserInfo;
 import android.net.Uri;
-import android.nfc.BeamShareData;
 import android.nfc.IAppCallback;
 import android.nfc.NdefMessage;
 import android.nfc.NdefRecord;
@@ -376,7 +375,7 @@ class P2pLinkManager implements Handler.Callback, P2pEventListener.Callback {
             mNdefCallbackUid = callingUid;
         }
     }
-
+   /*
     public void onManualBeamInvoke(BeamShareData shareData) {
         synchronized (P2pLinkManager.this) {
             if (mLinkState != LINK_STATE_DOWN) {
@@ -407,7 +406,7 @@ class P2pLinkManager implements Handler.Callback, P2pEventListener.Callback {
             }
         }
     }
-
+   */
     /** Must be called on UI Thread. */
     public void onLlcpActivated(byte peerLlcpVersion) {
         Log.i(TAG, "LLCP activated");
@@ -510,12 +509,14 @@ class P2pLinkManager implements Handler.Callback, P2pEventListener.Callback {
             if (mCallbackNdef != null) {
                 if (foregroundUids.contains(mNdefCallbackUid)) {
                     try {
+                       /*
                         BeamShareData shareData =
                                 mCallbackNdef.createBeamShareData(mPeerLlcpVersion);
                         mMessageToSend = shareData.ndefMessage;
                         mUrisToSend = shareData.uris;
                         mUserHandle = shareData.userHandle;
                         mSendFlags = shareData.flags;
+                       */
                         return;
                     } catch (Exception e) {
                         Log.e(TAG, "Failed NDEF callback: ", e);
@@ -1133,7 +1134,7 @@ class P2pLinkManager implements Handler.Callback, P2pEventListener.Callback {
                     mEventListener.onP2pSendComplete();
                     if (mCallbackNdef != null) {
                         try {
-                            mCallbackNdef.onNdefPushComplete(mPeerLlcpVersion);
+                            //mCallbackNdef.onNdefPushComplete(mPeerLlcpVersion);
                         } catch (Exception e) {
                             Log.e(TAG, "Failed NDEF completed callback: " + e.getMessage());
                         }
