@@ -319,7 +319,13 @@ public class CardEmulationManager
                             uh.getIdentifier(),
                             CardEmulation.CATEGORY_PAYMENT,
                             validateInstalled && (uh.getIdentifier() == userId));
-            if (DBG) Log.d(TAG, "default: " + paymentService + " for user:" + uh);
+            if (DBG)
+                Log.d(
+                        TAG,
+                        "verifyDefaults() - default payment: "
+                                + paymentService
+                                + " for user:"
+                                + uh);
             if (paymentService != null) {
                 numDefaultPaymentServices++;
                 defaultPaymentService = paymentService;
@@ -327,22 +333,23 @@ public class CardEmulationManager
             }
         }
         if (numDefaultPaymentServices > 1) {
-            Log.e(TAG, "Current default is not aligned across multiple users");
+            Log.e(TAG, "verifyDefaults() - Current default is not aligned across multiple users");
             // leave default unset
             for (UserHandle uh : luh) {
                 setDefaultServiceForCategoryChecked(
                         uh.getIdentifier(), null, CardEmulation.CATEGORY_PAYMENT);
             }
-        } else {
-            if (DBG) {
-                Log.d(
-                        TAG,
-                        "Current default: "
-                                + defaultPaymentService
-                                + " for user:"
-                                + userIdDefaultPaymentService);
-            }
         }
+        // else {
+        //     if (DBG) {
+        //         Log.d(
+        //                 TAG,
+        //                 "verifyDefaults() - Current default: "
+        //                         + defaultPaymentService
+        //                         + " for user:"
+        //                         + userIdDefaultPaymentService);
+        //     }
+        // }
 
         if (defaultPaymentService == null) {
             // A payment service may have been removed, leaving only one;
@@ -945,6 +952,7 @@ public class CardEmulationManager
         if (DBG) Log.d(TAG, "onRoutingTableChanged()");
 
         mAidCache.onRoutingTableChanged();
+        mT3tIdentifiersCache.onRoutingTableChanged();
     }
 
     public Map<String, Integer> getServicesAidCacheSize(int userId, String category) {

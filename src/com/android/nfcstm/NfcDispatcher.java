@@ -276,6 +276,7 @@ class NfcDispatcher {
             // is not available on Context. Instead, we query the PackageManager beforehand
             // to determine if there is an Activity to handle this intent, and base the
             // result of off that.
+            // try current user if there is an Activity to handle this intent
             List<ResolveInfo> activities =
                     packageManager.queryIntentActivitiesAsUser(
                             intent, 0, ActivityManager.getCurrentUser());
@@ -303,6 +304,7 @@ class NfcDispatcher {
         }
 
         boolean tryStartActivity(Intent intentToStart) {
+            // try current user if there is an Activity to handle this intent
             List<ResolveInfo> activities =
                     packageManager.queryIntentActivitiesAsUser(
                             intentToStart, 0, ActivityManager.getCurrentUser());
@@ -378,12 +380,10 @@ class NfcDispatcher {
         }
 
         boolean screenUnlocked = false;
-
         if (!provisioningOnly
                 && mScreenStateHelper.checkScreenState()
                         == ScreenStateHelper.SCREEN_STATE_ON_LOCKED) {
             screenUnlocked = handleNfcUnlock(tag);
-
             if (!screenUnlocked) return DISPATCH_FAIL;
         }
 
@@ -882,11 +882,9 @@ class NfcDispatcher {
             dispatch.tryStartActivity();
             return;
         }
-
         AlertDialog.Builder builder =
                 new AlertDialog.Builder(
                         mContext.getApplicationContext(), R.style.DialogAlertDayNight);
-
         builder.setTitle(R.string.title_confirm_url_open);
         LayoutInflater inflater = LayoutInflater.from(mContext);
         View view = inflater.inflate(R.layout.url_open_confirmation, null);

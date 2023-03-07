@@ -39,6 +39,7 @@ import android.graphics.SurfaceTexture;
 import android.hardware.display.DisplayManager;
 import android.os.AsyncTask;
 import android.os.Binder;
+import android.os.IBinder;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.ActionMode;
@@ -50,6 +51,7 @@ import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.SearchEvent;
 import android.view.Surface;
+import android.view.SurfaceControl;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
@@ -63,7 +65,6 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 import com.android.internal.policy.PhoneWindow;
-import com.android.internal.policy.SystemBarUtils;
 import com.android.nfcstm.R;
 
 /**
@@ -251,6 +252,7 @@ public class SendUi
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         0,
                         0,
+                        // WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
                         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                         WindowManager.LayoutParams.FLAG_FULLSCREEN
                                 | hwAccelerationFlags
@@ -383,7 +385,10 @@ public class SendUi
         // Update display metrics
         mDisplay.getRealMetrics(mDisplayMetrics);
 
-        final int statusBarHeight = SystemBarUtils.getStatusBarHeight(mContext);
+        // final int statusBarHeight = SystemBarUtils.getStatusBarHeight(mContext);
+        final int statusBarHeight =
+                mContext.getResources()
+                        .getDimensionPixelSize(com.android.internal.R.dimen.status_bar_height);
 
         mBlackLayer.setVisibility(View.GONE);
         mBlackLayer.setAlpha(0f);
@@ -609,23 +614,16 @@ public class SendUi
 
     /** Returns a screenshot of the current display contents. */
     Bitmap createScreenshot() {
-        boolean hasNavBar =
-                mContext.getResources()
-                        .getBoolean(com.android.internal.R.bool.config_showNavigationBar);
-        final int statusBarHeight = SystemBarUtils.getStatusBarHeight(mContext);
-
-        // Temporary patch for Android 12.. Start
 
         //       boolean hasNavBar =
         //               mContext.getResources()
         //                      .getBoolean(com.android.internal.R.bool.config_showNavigationBar);
-        //        boolean hasNavBar = true;
+        boolean hasNavBar = true;
 
-        // ..End
-        //        final int statusBarHeight =
-        //                mContext.getResources()
-        //
-        // .getDimensionPixelSize(com.android.internal.R.dimen.status_bar_height);
+        // final int statusBarHeight = SystemBarUtils.getStatusBarHeight(mContext);
+        final int statusBarHeight =
+                mContext.getResources()
+                        .getDimensionPixelSize(com.android.internal.R.dimen.status_bar_height);
 
         // Navbar has different sizes, depending on orientation
         final int navBarHeight =
@@ -685,11 +683,20 @@ public class SendUi
 
         int width = crop.width();
         int height = crop.height();
+
+        return null;
         // Take the screenshot. SurfaceControl will generate a hardware bitmap in the correct
         // orientation and size.
-        // Bitmap bitmap = SurfaceControl.screenshot(crop, width, height, rot);
-        // Temporary fix for Android 12
-        Bitmap bitmap = null;
+        /* IBinder displayToken = SurfaceControl.getInternalDisplayToken();
+        final SurfaceControl.DisplayCaptureArgs captureArgs =
+                new SurfaceControl.DisplayCaptureArgs.Builder(displayToken)
+                        .setSourceCrop(crop)
+                        .setSize(width, height)
+                        .build();
+        SurfaceControl.ScreenshotHardwareBuffer screenshotBuffer =
+                SurfaceControl.captureDisplay(captureArgs);
+        final Bitmap bitmap = screenshotBuffer == null ? null : screenshotBuffer.asBitmap();
+
         // Bail if we couldn't take the screenshot
         if (bitmap == null) {
             return null;
@@ -697,7 +704,7 @@ public class SendUi
 
         // Convert to a software bitmap so it can be set in an ImageView.
         Bitmap swBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true);
-        return swBitmap;
+        return swBitmap; */
     }
 
     @Override

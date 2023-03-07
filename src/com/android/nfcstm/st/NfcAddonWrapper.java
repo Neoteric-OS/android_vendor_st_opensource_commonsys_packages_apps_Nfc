@@ -65,7 +65,6 @@ public class NfcAddonWrapper implements ISeController.Callback {
     }
 
     public void applyInitializeSequence() {
-
         PackageManager pm = mContext.getPackageManager();
         boolean isHceCapable = pm.hasSystemFeature(PackageManager.FEATURE_NFC_HOST_CARD_EMULATION);
         boolean isBeamCapable = pm.hasSystemFeature(PackageManager.FEATURE_NFC_BEAM);
@@ -75,11 +74,14 @@ public class NfcAddonWrapper implements ISeController.Callback {
         if (isHceCapable) {
             Log.d(TAG, "applyInitializeSequence() - isHceCapable=1");
 
-            //            ContentResolver mContentResolver = mContext.getContentResolver();
+            // ContentResolver mContentResolver = mContext.getContentResolver();
             int hceFlag = mPrefs.getInt(PREF_MODE_HCE, NfcSettingsAdapter.FLAG_ON);
             if (hceFlag == 1) {
                 isHceOn = true;
             }
+        } else {
+            mPrefsEditor.putInt(PREF_MODE_HCE, NfcSettingsAdapter.FLAG_OFF);
+            mPrefsEditor.apply();
         }
 
         Log.d(TAG, "applyInitializeSequence() - isHceOn = " + isHceOn);
@@ -93,6 +95,9 @@ public class NfcAddonWrapper implements ISeController.Callback {
         if ((mPrefs.getInt(PREF_MODE_P2P, NfcSettingsAdapter.FLAG_ON) == NfcSettingsAdapter.FLAG_ON)
                 && (isBeamCapable)) {
             mode |= NfcSettingsAdapter.MODE_P2P;
+        } else {
+            mPrefsEditor.putInt(PREF_MODE_P2P, NfcSettingsAdapter.FLAG_OFF);
+            mPrefsEditor.apply();
         }
         if (isHceOn) {
             mode |= NfcSettingsAdapter.MODE_HCE;
@@ -193,6 +198,7 @@ public class NfcAddonWrapper implements ISeController.Callback {
 
     // Nfc Framework API
     public void setModeFlag(boolean isNfcEnabled, int mode, int flag, Object syncObj) {
+        PackageManager pm = mContext.getPackageManager();
         Log.d(
                 TAG,
                 "setModeFlag() - isNfcEnabled = "
@@ -234,24 +240,32 @@ public class NfcAddonWrapper implements ISeController.Callback {
             }
 
             if ((mode & NfcSettingsAdapter.MODE_P2P) != 0) {
-                mPrefsEditor.putInt(PREF_MODE_P2P, flag);
-                mPrefsEditor.apply();
-
-                if (flag == NfcSettingsAdapter.FLAG_OFF) {
-                    modeBitmap &= ~0xC;
+                if (!pm.hasSystemFeature(PackageManager.FEATURE_NFC_BEAM)) {
+                    Log.w(TAG, "setModeFlag() - P2P requested but feature unavailable");
                 } else {
-                    modeBitmap |= 0xC;
+                    mPrefsEditor.putInt(PREF_MODE_P2P, flag);
+                    mPrefsEditor.apply();
+
+                    if (flag == NfcSettingsAdapter.FLAG_OFF) {
+                        modeBitmap &= ~0xC;
+                    } else {
+                        modeBitmap |= 0xC;
+                    }
                 }
             }
 
             if ((mode & NfcSettingsAdapter.MODE_HCE) != 0) {
-                mPrefsEditor.putInt(PREF_MODE_HCE, flag);
-                mPrefsEditor.apply();
-
-                if (flag == NfcSettingsAdapter.FLAG_OFF) {
-                    modeBitmap &= ~0x2;
+                if (!pm.hasSystemFeature(PackageManager.FEATURE_NFC_HOST_CARD_EMULATION)) {
+                    Log.w(TAG, "setModeFlag() - HCE requested but feature unavailable");
                 } else {
-                    modeBitmap |= 0x2;
+                    mPrefsEditor.putInt(PREF_MODE_HCE, flag);
+                    mPrefsEditor.apply();
+
+                    if (flag == NfcSettingsAdapter.FLAG_OFF) {
+                        modeBitmap &= ~0x2;
+                    } else {
+                        modeBitmap |= 0x2;
+                    }
                 }
             }
 

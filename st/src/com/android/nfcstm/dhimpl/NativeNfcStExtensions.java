@@ -53,10 +53,6 @@ public class NativeNfcStExtensions {
 
     public native byte[] getHWVersion();
 
-    public native int loopback();
-
-    public native int getHceUserProp();
-
     public native void setRfConfiguration(int modeBitmap, byte[] techArray);
 
     public native int getRfConfiguration(byte[] techArray);
@@ -82,17 +78,9 @@ public class NativeNfcStExtensions {
 
     public native boolean EnableSE(int se_id, boolean enable);
 
-    public native boolean connectEE(int cee_id);
+    public native boolean connectEE();
 
-    public native byte[] transceiveEE(int cee_id, byte[] dataCmd);
-
-    public native boolean disconnectEE(int cee_id);
-
-    public native int connectGate(int gate_id, int host_id);
-
-    public native byte[] transceive(int pipe_id, int hciCmd, byte[] dataCmd);
-
-    public native void disconnectGate(int pipe_id);
+    public native boolean disconnectEE();
 
     public native void setNciConfig(int param_id, byte[] param, int length);
 
@@ -114,5 +102,5 @@ public class NativeNfcStExtensions {
 
     public native byte[] rawJniSeq(int i, byte[] ba);
 
-    public native int checkNdefNfceeAvailable();
+    public native boolean checkNdefNfceeAvailable();
 }

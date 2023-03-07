@@ -51,12 +51,12 @@ public class SystemCodeRoutingManager {
                 }
             }
             if (toBeAdded.size() <= 0 && toBeRemoved.size() <= 0) {
-                Log.d(TAG, "Routing table unchanged, not updating");
+                Log.d(TAG, "configureRouting() - Routing table unchanged, not updating");
                 return false;
             }
             // Update internal structures
             for (T3tIdentifier t3tIdentifier : toBeRemoved) {
-                if (DBG) Log.d(TAG, "deregisterNfcFSystemCodeonDh:");
+                if (DBG) Log.d(TAG, "configureRouting() - Register SC on DH");
                 NfcService.getInstance()
                         .deregisterT3tIdentifier(
                                 t3tIdentifier.systemCode,
@@ -64,7 +64,7 @@ public class SystemCodeRoutingManager {
                                 t3tIdentifier.t3tPmm);
             }
             for (T3tIdentifier t3tIdentifier : toBeAdded) {
-                if (DBG) Log.d(TAG, "registerNfcFSystemCodeonDh:");
+                if (DBG) Log.d(TAG, "configureRouting() - Deregister SC on DH");
                 NfcService.getInstance()
                         .registerT3tIdentifier(
                                 t3tIdentifier.systemCode,
@@ -74,12 +74,15 @@ public class SystemCodeRoutingManager {
             if (DBG) {
                 Log.d(
                         TAG,
-                        "(Before) mConfiguredT3tIdentifiers: size="
+                        "configureRouting() - (Before) mConfiguredT3tIdentifiers: size="
                                 + mConfiguredT3tIdentifiers.size());
                 for (T3tIdentifier t3tIdentifier : mConfiguredT3tIdentifiers) {
                     Log.d(TAG, "    " + t3tIdentifier.systemCode + "/" + t3tIdentifier.t3tPmm);
                 }
-                Log.d(TAG, "(After) mConfiguredT3tIdentifiers: size=" + t3tIdentifiers.size());
+                Log.d(
+                        TAG,
+                        "configureRouting() - (After) mConfiguredT3tIdentifiers: size="
+                                + t3tIdentifiers.size());
                 for (T3tIdentifier t3tIdentifier : t3tIdentifiers) {
                     Log.d(
                             TAG,

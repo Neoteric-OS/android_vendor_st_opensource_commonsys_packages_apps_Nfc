@@ -26,11 +26,9 @@ import java.io.IOException;
 
 public final class SnepClient {
     private static final String TAG = "SnepClient";
-
     private static final boolean DBG =
             SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
     private static final int DEFAULT_ACCEPTABLE_LENGTH = 100 * 1024;
-
     private static final int DEFAULT_MIU = 128;
     private static final int DEFAULT_RWSIZE = 1;
     SnepMessenger mMessenger = null;

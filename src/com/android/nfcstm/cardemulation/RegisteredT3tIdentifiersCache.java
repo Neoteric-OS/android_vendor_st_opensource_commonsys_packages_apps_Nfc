@@ -93,10 +93,13 @@ public class RegisteredT3tIdentifiersCache {
 
     public NfcFServiceInfo resolveNfcid2(String nfcid2) {
         synchronized (mLock) {
-            if (DBG) Log.d(TAG, "resolveNfcid2: resolving NFCID " + nfcid2);
+            if (DBG) Log.d(TAG, "resolveNfcid2() - resolving NFCID " + nfcid2);
             NfcFServiceInfo resolveInfo;
             resolveInfo = mForegroundT3tIdentifiersCache.get(nfcid2);
-            Log.d(TAG, "Resolved to: " + (resolveInfo == null ? "null" : resolveInfo.toString()));
+            Log.d(
+                    TAG,
+                    "resolveNfcid2() - Resolved to: "
+                            + (resolveInfo == null ? "null" : resolveInfo.toString()));
             return resolveInfo;
         }
     }
@@ -132,7 +135,7 @@ public class RegisteredT3tIdentifiersCache {
         if (DBG) {
             Log.d(
                     TAG,
-                    "mForegroundT3tIdentifiersCache: size="
+                    "generateForegroundT3tIdentifiersCacheLocked() - mForegroundT3tIdentifiersCache: size="
                             + mForegroundT3tIdentifiersCache.size());
             for (Map.Entry<String, NfcFServiceInfo> entry :
                     mForegroundT3tIdentifiersCache.entrySet()) {
@@ -148,7 +151,7 @@ public class RegisteredT3tIdentifiersCache {
     void updateRoutingLocked(boolean force) {
         if (DBG) Log.d(TAG, "updateRoutingLocked");
         if (!mNfcEnabled) {
-            Log.d(TAG, "Not updating routing table because NFC is off.");
+            Log.d(TAG, "updateRoutingLocked() - Not updating routing table because NFC is off.");
             return;
         }
 
@@ -179,6 +182,12 @@ public class RegisteredT3tIdentifiersCache {
         }
     }
 
+    public void onRoutingTableChanged() {
+        synchronized (mLock) {
+            updateRoutingLocked(true);
+        }
+    }
+
     public void onServicesUpdated(int userId, List<NfcFServiceInfo> services) {
         if (DBG) Log.d(TAG, "onServicesUpdated");
         synchronized (mLock) {
@@ -188,7 +197,7 @@ public class RegisteredT3tIdentifiersCache {
 
     /** Enabled Foreground NfcF service changed */
     public void onEnabledForegroundNfcFServiceChanged(int userId, ComponentName component) {
-        if (DBG) Log.d(TAG, "Enabled foreground service changed.");
+        if (DBG) Log.d(TAG, "onEnabledForegroundNfcFServiceChanged()");
         synchronized (mLock) {
             if (component != null) {
                 if (mEnabledForegroundService != null

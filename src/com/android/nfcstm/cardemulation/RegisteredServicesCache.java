@@ -412,6 +412,46 @@ public class RegisteredServicesCache {
             }
         }
 
+        // Register NDEF-NFCEE AID if system property set
+        if (android.os.SystemProperties.get("persist.st_nfc_route_ndefnfcee").equals("1")) {
+
+            if (DBG) {
+                Log.d(
+                        TAG,
+                        "getInstalledStServices() - Adding service for routing of NDEF-NFCEE AID");
+            }
+
+            // Add NDEF-NFCEE AID
+            ResolveInfo ndefNfceeAppInfo = new ResolveInfo();
+            ndefNfceeAppInfo.resolvePackageName = "NdefNfceeAidRoute";
+            ndefNfceeAppInfo.serviceInfo = new ServiceInfo();
+            ndefNfceeAppInfo.serviceInfo.packageName = "com.st.nfc.ndef_nfcee";
+            ndefNfceeAppInfo.serviceInfo.name = "com.st.nfc.ndef_nfcee.NdefNfceeService";
+            List<String> ndefNfceeAid = new ArrayList<String>();
+            ndefNfceeAid.add("D2760000850101");
+            StAidGroup ndefNfceeAidGroup =
+                    new StAidGroup(ndefNfceeAid, "other", "NDEF-NFCEE service");
+            ArrayList<StAidGroup> ndefNfceeAidStaticGroups = new ArrayList<>();
+            ndefNfceeAidStaticGroups.add(ndefNfceeAidGroup);
+            ArrayList<StAidGroup> ndefNfceeAidDynamicGroups = new ArrayList<>();
+            StApduServiceInfo ndefNfceeAidService =
+                    new StApduServiceInfo(
+                            ndefNfceeAppInfo,
+                            false,
+                            "Ndef-Nfcee service",
+                            ndefNfceeAidStaticGroups,
+                            ndefNfceeAidDynamicGroups,
+                            false,
+                            false,
+                            0,
+                            userId,
+                            "NDEF-NFCEE service",
+                            "Ndef-Nfcee",
+                            "Ndef-Nfcee",
+                            null);
+            validServices.add(ndefNfceeAidService);
+        }
+
         return validServices;
     }
 

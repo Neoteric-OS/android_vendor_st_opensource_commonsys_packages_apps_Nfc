@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.SystemProperties;
 import android.util.Log;
+import com.android.nfcstm.NfcService;
 import com.android.nfcstm.dhimpl.NativeNfcStExtensions;
 import com.android.nfcstm.dhimpl.StNativeNfcManager;
 import java.util.ArrayList;
@@ -561,14 +562,17 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
         // mContentProviderUtil.setAvailableSeList();
 
         // Check NDEF-NFCEE
-        int ndefNfceeId = mStExtensions.checkNdefNfceeAvailable();
-        if (ndefNfceeId != 0x00) {
-            Log.d(
-                    TAG,
-                    "restorePreviousSe() - NDEF-NFCEE supported, enabling NFCEE Id = "
-                            + String.format("0x%02X", ndefNfceeId));
+        if (mStExtensions.checkNdefNfceeAvailable()) {
+            Log.d(TAG, "restorePreviousSe() - NDEF-NFCEE supported, enabling");
 
-            mStExtensions.EnableSE(ndefNfceeId, true);
+            // any se_id except one starting with 0x8x will do
+            ret = mStExtensions.EnableSE(0x10, true);
+            if (ret) {
+                ret = mStExtensions.connectEE();
+                if (!ret) {
+                    ret = mStExtensions.EnableSE(0x10, false);
+                }
+            }
         }
 
         Log.d(TAG, "restorePreviousSe(exit) ");
@@ -723,6 +727,33 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
 
         int targetSE = mContentProviderUtil.getIdofString(str);
 
+        String statusCurrent = "";
+        if (str.equals(SETTING_STR_ESE)) {
+            statusCurrent = getESeState();
+        } else if (str.equals(SETTING_STR_DHSE)) {
+            statusCurrent = getDHSEState();
+        } else if (str.equals(SETTING_STR_SIM1)) {
+            statusCurrent = getSim1State();
+        } else if (str.equals(SETTING_STR_SIM2)) {
+            statusCurrent = getSim2State();
+        }
+
+        if ((statusCurrent.contains(SE_STATE_ACTIVATED) && enable)
+                || (statusCurrent.contains(SE_STATE_AVAILABLE) && !enable)
+                || (statusCurrent.contains(SE_STATE_NOT_AVAILABLE))) {
+            if (DBG)
+                Log.w(
+                        TAG,
+                        "EnableSecureElement() - SE Id: "
+                                + str
+                                + ", requested status: "
+                                + enable
+                                + ", current status: "
+                                + statusCurrent
+                                + ", not applied");
+            return true;
+        }
+
         if (DBG)
             Log.d(
                     TAG,
@@ -780,8 +811,8 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
 
     private void RefreshSeStatus(boolean initial) {
 
-        byte[] nfceeid = new byte[3];
-        byte[] conInfo = new byte[3];
+        byte[] nfceeid = new byte[NfcService.NFA_EE_MAX_EE_SUPPORTED];
+        byte[] conInfo = new byte[NfcService.NFA_EE_MAX_EE_SUPPORTED];
         int eSeId = 0x00;
         mStActiveUicc = 0;
         mStActiveeSe = 0;

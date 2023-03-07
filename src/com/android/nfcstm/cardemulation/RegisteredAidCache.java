@@ -518,10 +518,11 @@ public class RegisteredAidCache {
             } else {
                 // No children that are preferred; add all services of the root
                 // make single service default if no children are present
-                if (DBG)
-                    Log.d(
-                            TAG,
-                            "resolveAidConflictLocked() - No service has preference, adding all.");
+                // if (DBG)
+                //     Log.d(
+                //             TAG,
+                //             "resolveAidConflictLocked() - No service has preference, adding
+                // all.");
                 resolveinfo = resolveAidConflictLocked(aidServices, conflictingServices.isEmpty());
                 // If the AID is subsetAID check for conflicting prefix in all
                 // conflciting services and root services.
@@ -573,12 +574,34 @@ public class RegisteredAidCache {
                 continue;
             }
             for (StApduServiceInfo service : entry.getValue()) {
-                if (DBG)
-                    Log.d(TAG, "generateServiceMapLocked() - component: " + service.getComponent());
+                if (DBG) {
+                    String category = null;
+                    if (service.hasCategory(CardEmulation.CATEGORY_OTHER)) {
+                        category = CardEmulation.CATEGORY_OTHER;
+                    } else {
+                        category = CardEmulation.CATEGORY_PAYMENT;
+                    }
+
+                    String route = "DH";
+                    if (!service.isOnHost()) {
+                        route = service.getOffHostSecureElement();
+                    }
+
+                    Log.d(
+                            TAG,
+                            "generateServiceMapLocked() - component: "
+                                    + service.getComponent()
+                                    + ", category: "
+                                    + category
+                                    + ", route: "
+                                    + route);
+                }
+
                 List<String> prefixAids = service.getPrefixAids();
                 List<String> subSetAids = service.getSubsetAids();
 
                 for (String aid : service.getAids()) {
+                    // if (DBG) Log.d(TAG, "generateServiceMapLocked() - processing aid: " + aid);
                     if (DBG) Log.d(TAG, "generateServiceMapLocked() - processing aid: " + aid);
                     if (!CardEmulation.isValidAid(aid)) {
                         if (DBG)
@@ -914,8 +937,10 @@ public class RegisteredAidCache {
                             // host, so we can ask the user which service is preferred.
                             // Since these are all "children" of the prefix, they don't need
                             // to be routed, since the prefix will already get routed to the host
-                            childResolveInfo.mustRoute = false;
-                            aidCache.put(entry.getKey(), childResolveInfo);
+                            // childResolveInfo.mustRoute = false;
+                            // aidCache.put(entry.getKey(), childResolveInfo);
+                            resolveInfo.services.add(entry.getValue().get(0).service);
+                            aidCache.put(aidToResolve, resolveInfo);
                             resolvedAids.add(entry.getKey());
                             foundChildService |= !childResolveInfo.services.isEmpty();
                         }
@@ -974,25 +999,6 @@ public class RegisteredAidCache {
                 // Resolve conflicts
                 AidResolveInfo resolveInfo =
                         resolveAidConflictLocked(subsetServices, aidConflicts.services);
-                if (DBG) {
-                    if (resolveInfo.defaultService == null) {
-                        Log.d(
-                                TAG,
-                                "generateAidCacheLocked() - Adding category: "
-                                        + resolveInfo.category
-                                        + ", component: null, aid: "
-                                        + aidToResolve);
-                    } else {
-                        Log.d(
-                                TAG,
-                                "generateAidCacheLocked() - Adding category: "
-                                        + resolveInfo.category
-                                        + ", component: "
-                                        + resolveInfo.defaultService.getComponent()
-                                        + ", aid: "
-                                        + aidToResolve);
-                    }
-                }
                 mAidCache.put(aidToResolve, resolveInfo);
                 resolvedAids.add(aidToResolve);
                 if (resolveInfo.defaultService != null) {
@@ -1011,25 +1017,6 @@ public class RegisteredAidCache {
                         AidResolveInfo childResolveInfo =
                                 resolveAidConflictLocked(
                                         mAidServices.get(resolveInfo.prefixInfo.prefixAid), false);
-                        if (DBG) {
-                            if (childResolveInfo.defaultService == null) {
-                                Log.d(
-                                        TAG,
-                                        "generateAidCacheLocked() - Adding category: "
-                                                + childResolveInfo.category
-                                                + ", component: null, aid: "
-                                                + resolveInfo.prefixInfo.prefixAid);
-                            } else {
-                                Log.d(
-                                        TAG,
-                                        "generateAidCacheLocked() - Adding category: "
-                                                + childResolveInfo.category
-                                                + ", component: "
-                                                + childResolveInfo.defaultService.getComponent()
-                                                + ", aid: "
-                                                + resolveInfo.prefixInfo.prefixAid);
-                            }
-                        }
                         mAidCache.put(resolveInfo.prefixInfo.prefixAid, childResolveInfo);
                     }
                     resolvedAids.addAll(aidConflicts.aids);
@@ -1051,31 +1038,14 @@ public class RegisteredAidCache {
                             //                     + " adding all handling services.");
                             AidResolveInfo childResolveInfo =
                                     resolveAidConflictLocked(entry.getValue(), false);
-                            if (DBG) {
-                                if (childResolveInfo.defaultService == null) {
-                                    Log.d(
-                                            TAG,
-                                            "generateAidCacheLocked() - Adding category: "
-                                                    + childResolveInfo.category
-                                                    + ", component: null, aid: "
-                                                    + entry.getKey());
-                                } else {
-                                    Log.d(
-                                            TAG,
-                                            "generateAidCacheLocked() - Adding category: "
-                                                    + childResolveInfo.category
-                                                    + ", component: "
-                                                    + childResolveInfo.defaultService.getComponent()
-                                                    + ", aid: "
-                                                    + entry.getKey());
-                                }
-                            }
                             // Special case: in this case all children AIDs must be routed to the
                             // host, so we can ask the user which service is preferred.
                             // Since these are all "children" of the subset, they don't need
                             // to be routed, since the subset will already get routed to the host
-                            childResolveInfo.mustRoute = false;
-                            mAidCache.put(entry.getKey(), childResolveInfo);
+                            // childResolveInfo.mustRoute = false;
+                            // mAidCache.put(entry.getKey(), childResolveInfo);
+                            resolveInfo.services.add(entry.getValue().get(0).service);
+                            aidCache.put(aidToResolve, resolveInfo);
                             resolvedAids.add(entry.getKey());
                             foundChildService |= !childResolveInfo.services.isEmpty();
                         }
@@ -1086,25 +1056,6 @@ public class RegisteredAidCache {
                         AidResolveInfo childResolveInfo =
                                 resolveAidConflictLocked(
                                         mAidServices.get(resolveInfo.prefixInfo.prefixAid), false);
-                        if (DBG) {
-                            if (childResolveInfo.defaultService == null) {
-                                Log.d(
-                                        TAG,
-                                        "generateAidCacheLocked() - Adding category: "
-                                                + childResolveInfo.category
-                                                + ", component: null, aid: "
-                                                + resolveInfo.prefixInfo.prefixAid);
-                            } else {
-                                Log.d(
-                                        TAG,
-                                        "generateAidCacheLocked() - Adding category: "
-                                                + childResolveInfo.category
-                                                + ", component: "
-                                                + childResolveInfo.defaultService.getComponent()
-                                                + ", aid: "
-                                                + resolveInfo.prefixInfo.prefixAid);
-                            }
-                        }
                         mAidCache.put(resolveInfo.prefixInfo.prefixAid, childResolveInfo);
                         // if (DBG)
                         //     Log.d(
@@ -1128,27 +1079,6 @@ public class RegisteredAidCache {
                 // true because reversedQueue is lexicographically ordered in revrese, and
                 // so by necessity all other AIDs are different than this AID or shorter.
                 // if (DBG) Log.d(TAG, "Exact or Prefix AID."+aidToResolve);
-                if (DBG) {
-                    ArrayList<ServiceAidInfo> services =
-                            new ArrayList<ServiceAidInfo>(mAidServices.get(aidToResolve));
-                    if (services.get(0).service == null) {
-                        Log.d(
-                                TAG,
-                                "generateAidCacheLocked() - Adding category: "
-                                        + services.get(0).category
-                                        + ", component: null, aid: "
-                                        + aidToResolve);
-                    } else {
-                        Log.d(
-                                TAG,
-                                "generateAidCacheLocked() - Adding category: "
-                                        + services.get(0).category
-                                        + ", component: "
-                                        + services.get(0).service.getComponent()
-                                        + ", aid: "
-                                        + aidToResolve);
-                    }
-                }
                 mAidCache.put(aidToResolve, aidCache.get(aidToResolve));
                 resolvedAids.add(aidToResolve);
             }
@@ -1301,6 +1231,25 @@ public class RegisteredAidCache {
                 aidType.power = computeAidPowerState(onHost, requiresScreenOn, requiresUnlock);
 
                 routingEntries.put(aid, aidType);
+            }
+            if ((DBG) && (resolveInfo.services.size() != 0)) {
+                String host = "DH";
+                if (!aidType.isOnHost) {
+                    host = aidType.offHostSE;
+                }
+
+                Log.d(
+                        TAG,
+                        "updateRoutingLocked() - AID "
+                                + aid
+                                + ", route: "
+                                + host
+                                + ", power: "
+                                + String.format("0x%02X", aidType.power)
+                                + ", nb services: "
+                                + resolveInfo.services.size()
+                                + ", service: "
+                                + resolveInfo.services.get(0).getComponent().flattenToString());
             }
         }
         mRoutingManager.configureRouting(routingEntries, force);

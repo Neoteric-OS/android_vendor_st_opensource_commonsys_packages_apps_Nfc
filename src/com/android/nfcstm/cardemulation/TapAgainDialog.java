@@ -76,7 +76,8 @@ public class TapAgainDialog extends AlertActivity implements DialogInterface.OnC
 
         PackageManager pm = getPackageManager();
 
-        Toolbar toolbar = (Toolbar) ap.mView.findViewById(com.android.nfcstm.R.id.tap_again_toolbar);
+        Toolbar toolbar =
+                (Toolbar) ap.mView.findViewById(com.android.nfcstm.R.id.tap_again_toolbar);
         toolbar.setNavigationIcon(getDrawable(com.android.nfcstm.R.drawable.ic_close));
         toolbar.setNavigationOnClickListener(
                 new View.OnClickListener() {

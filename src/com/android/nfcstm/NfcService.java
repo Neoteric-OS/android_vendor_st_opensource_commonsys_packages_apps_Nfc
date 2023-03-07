@@ -42,6 +42,7 @@ package com.android.nfcstm;
 
 import android.annotation.Nullable;
 import com.android.nfcstm.st.StDeviceHost;
+
 import android.app.ActivityManager;
 import android.app.Application;
 import android.app.BroadcastOptions;
@@ -69,6 +70,7 @@ import android.content.ServiceConnection;
 import com.android.nfcstm.dhimpl.StNativeNfcManager;
 import com.android.nfcstm.dhimpl.StNativeNfcSecureElement;
 import com.android.nfcstm.dhimpl.NativeNfcStExtensions;
+import com.android.nfcstm.dhimpl.StNativeNdefNfcee;
 import android.content.pm.UserInfo;
 import android.content.res.Resources.NotFoundException;
 import android.media.AudioAttributes;
@@ -99,6 +101,7 @@ import com.st.android.nfc_extensions.INfcWalletRawCallback;
 import com.st.android.nfc_extensions.INfcChargingDataCallback;
 import com.st.android.nfc_extensions.INfceeActionNtfCallback;
 import com.st.android.nfc_extensions.INfcStExtensionsRestartCb;
+import com.st.android.nfc_extensions.INfcNdefNfceeAdapter;
 import android.nfc.INfcUnlockHandler;
 import android.nfc.ITagRemovedCallback;
 import android.nfc.NdefMessage;
@@ -151,6 +154,7 @@ import com.android.nfcstm.cardemulation.CardEmulationManager;
 // import com.android.nfcstm.dhimpl.NativeNfcManager;
 import com.android.nfcstm.handover.HandoverDataParser;
 import com.android.nfcstm.dhimpl.StNativeNfcSecureElement;
+
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
@@ -312,6 +316,10 @@ public class NfcService implements DeviceHostListener {
     // may be a part of initialization.
     static final int INIT_WATCHDOG_MS = 30000;
 
+    // Number of EE supported by the CLF. This value needs to be aligned
+    // with the definition in core stack.
+    public static final int NFA_EE_MAX_EE_SUPPORTED = 5;
+
     // Time to wait for routing to be applied before watchdog
     // goes off
     static final int ROUTING_WATCHDOG_MS = 10000;
@@ -363,6 +371,7 @@ public class NfcService implements DeviceHostListener {
     private final UserManager mUserManager;
 
     private static int nci_version = NCI_VERSION_1_0;
+
     // NFC Execution Environment
     // fields below are protected by this
     private final boolean mPollingDisableAllowed;
@@ -496,6 +505,9 @@ public class NfcService implements DeviceHostListener {
 
     // for recording the latest Tag object cookie
     long mCookieUpToDate = 0;
+
+    NdefNfceeService mNdefNfceeService;
+    StNativeNdefNfcee mStNdefNfcee;
 
     private NfcDispatcher mNfcDispatcher;
     private PowerManager mPowerManager;
@@ -1081,6 +1093,8 @@ public class NfcService implements DeviceHostListener {
 
         mIsSEReaderMode = false;
 
+        mStNdefNfcee = new StNativeNdefNfcee();
+
         if (DBG) Log.d(TAG, "Constructor(end)");
     }
 
@@ -1091,11 +1105,11 @@ public class NfcService implements DeviceHostListener {
         boolean always = getESEAlwaysOnStatus();
         Log.d(
                 TAG,
-                "doKeepSwpActive() - isActive: "
+                "doKeepSwpActive() - newStatus: "
                         + isActive
-                        + " rc: "
+                        + " nbUsers: "
                         + mSecureElementActiveNbUsers
-                        + " always: "
+                        + " CurrentStatus: "
                         + always);
 
         if (isActive) {
@@ -1108,7 +1122,9 @@ public class NfcService implements DeviceHostListener {
                 }
             }
         } else {
-            mSecureElementActiveNbUsers--;
+            if (mSecureElementActiveNbUsers > 0) {
+                mSecureElementActiveNbUsers--;
+            }
             if (mSecureElementActiveNbUsers == 0) {
                 if (!always) {
                     mDeviceHost.setNfceePowerAndLinkCtrl(false);
@@ -2311,7 +2327,13 @@ public class NfcService implements DeviceHostListener {
                 Log.i(TAG, "EnableSE() - CEE ");
                 return mStExtensions.EnableSE(0x10, enable);
             }
-            return NfcAddonWrapper.getInstance().EnableSecureElement(se_id, enable);
+
+            boolean status = NfcAddonWrapper.getInstance().EnableSecureElement(se_id, enable);
+            if (status && (se_id.contains("eSE")) && enable && (mSecureElementActiveNbUsers == 0)) {
+                mDeviceHost.setNfceePowerAndLinkCtrl(getESEAlwaysOnStatus());
+            }
+
+            return status;
         }
 
         @Override
@@ -2643,7 +2665,8 @@ public class NfcService implements DeviceHostListener {
                 mDeviceHost.setNfcSecure(enable);
                 if (mIsHceCapable) {
                     // update HCE/HCEF routing and commitRouting if Nfc is enabled
-                    mCardEmulationManager.onSecureNfcToggled();
+                    // mCardEmulationManager.onSecureNfcToggled();
+                    updateRoutingTable();
                 } else if (isNfcEnabled()) {
                     // commit only tech/protocol route without HCE support
                     mDeviceHost.commitRouting();
@@ -3197,69 +3220,30 @@ public class NfcService implements DeviceHostListener {
 
         @Override
         public int loopback() {
-            if (isNfcEnabled() == false) {
-                Log.e(TAG, "NFC is not enabled, ignore");
-                return -1;
-            }
-            int res = mStExtensions.loopback();
-            return res;
+            Log.w(TAG, "loopback() -  Deprecated API, nothing done");
+            return 0;
         }
-
-        // @Override
-        // public void setNfcSystemProperty(String key, String value) {
-        // if(key.contentEquals("nfc.st.hce_capable")){
-        // NfcAddonWrapper.getInstance().setModeFlag(isNfcEnabled(),
-        // NfcSettingsAdapter.MODE_HCE,
-        // value.contentEquals("1") ?
-        // NfcSettingsAdapter.FLAG_ON:NfcSettingsAdapter.FLAG_OFF,
-        // NfcService.this);
-        // } else {
-        // mStExtensions.setNfcSystemProperty(key, value);
-        // }
-        // }
 
         @Override
         public boolean getHceCapability() {
-            return mIsHceCapable;
+            Log.w(TAG, "getHceCapability() -  Deprecated API, nothing done");
+            return true;
         }
 
         @Override
         public void setRfConfiguration(int modeBitmap, byte[] techArray) {
-            Log.i(TAG, "setRfConfiguration() -  modeBitmap" + String.valueOf(modeBitmap));
-            if (isNfcEnabled() == false) {
-                Log.e(TAG, "NFC is not enabled, ignore");
-                return;
-            }
-
-            NfcPermissions.enforceAdminPermissionsClient(mContext);
-
-            synchronized (NfcService.this) {
-                mStExtensions.setRfConfiguration(modeBitmap, techArray);
-            }
+            Log.w(TAG, "setRfConfiguration() -  Deprecated API, nothing done");
         }
 
         @Override
         public int getRfConfiguration(byte[] techArray) {
-            Log.i(TAG, "getRfConfiguration() ");
-            if (isNfcEnabled() == false) {
-                Log.e(TAG, "NFC is not enabled, ignore");
-                return -1;
-            }
-
-            return mStExtensions.getRfConfiguration(techArray);
+            Log.w(TAG, "getRfConfiguration() -  Deprecated API, nothing done");
+            return 0;
         }
 
         @Override
         public void setRfBitmap(int modeBitmap) {
-            Log.i(TAG, "setRfBitmap() - modeBitmap: " + Integer.toHexString(modeBitmap));
-            if (isNfcEnabled() == false) {
-                Log.e(TAG, "NFC is not enabled, ignore");
-                return;
-            }
-
-            NfcPermissions.enforceAdminPermissionsClient(mContext);
-
-            mStExtensions.setRfBitmap(modeBitmap);
+            Log.w(TAG, "setRfBitmap() -  Deprecated API, nothing done");
         }
 
         @Override
@@ -3273,7 +3257,7 @@ public class NfcService implements DeviceHostListener {
                     TAG,
                     "getProprietaryConfigSettings() SubSet ID "
                             + Integer.toHexString(SubSetID)
-                            + "- status =  "
+                            + " - status =  "
                             + status);
             return status;
         }
@@ -3332,7 +3316,7 @@ public class NfcService implements DeviceHostListener {
         @Override
         public byte[] getATR() {
             if (isNfcEnabled() == false) {
-                Log.e(TAG, "NFC is not enabled, ignore");
+                Log.e(TAG, "getATR() - NFC is not enabled, ignore");
                 return null;
             }
             Log.i(TAG, "getATR()");
@@ -3340,75 +3324,32 @@ public class NfcService implements DeviceHostListener {
         }
 
         public boolean connectEE(int ceeId) {
-            if (isNfcEnabled() == false) {
-                Log.e(TAG, "NFC is not enabled, ignore");
-                return false;
-            }
-
-            NfcPermissions.enforceAdminPermissionsClient(mContext);
-
-            Log.i(TAG, "connectEE() - ceeId =  " + ceeId);
-            return mStExtensions.connectEE(ceeId);
+            Log.i(TAG, "connectEE() - Deprecated, nothing done");
+            return false;
         }
 
         public byte[] transceiveEE(int cee_id, byte[] dataCmd) {
-            if (isNfcEnabled() == false) {
-                Log.e(TAG, "NFC is not enabled, ignore");
-                return null;
-            }
-
-            NfcPermissions.enforceAdminPermissionsClient(mContext);
-
-            Log.i(TAG, "transceiveEE() - ceeId =  " + cee_id);
-            return mStExtensions.transceiveEE(cee_id, dataCmd);
+            Log.i(TAG, "transceiveEE() - Deprecated, nothing done");
+            return null;
         }
 
         public boolean disconnectEE(int cee_id) {
-            if (isNfcEnabled() == false) {
-                Log.e(TAG, "NFC is not enabled, ignore");
-                return false;
-            }
-
-            NfcPermissions.enforceAdminPermissionsClient(mContext);
-
-            Log.i(TAG, "disconnectEE() - ceeId =  " + cee_id);
-            return mStExtensions.disconnectEE(cee_id);
+            Log.i(TAG, "disconnectEE() -  Deprecated, nothing done");
+            return false;
         }
 
         public int connectGate(int host_id, int gate_id) {
-            if (isNfcEnabled() == false) {
-                Log.e(TAG, "NFC is not enabled, ignore");
-                return -1;
-            }
-
-            NfcPermissions.enforceAdminPermissionsClient(mContext);
-
-            Log.i(TAG, "connectGate() - host_id =  " + host_id + " - gate_id = " + gate_id);
-            return mStExtensions.connectGate(gate_id, host_id);
+            Log.w(TAG, "connectGate() -  Deprecated API, nothing done");
+            return 0;
         }
 
         public byte[] transceive(int pipe_id, int hciCmd, byte[] dataIn) {
-            if (isNfcEnabled() == false) {
-                Log.e(TAG, "NFC is not enabled, ignore");
-                return null;
-            }
-
-            NfcPermissions.enforceAdminPermissionsClient(mContext);
-
-            Log.i(TAG, "transceive() - pipe_id =  " + pipe_id + " - HCI cmd = " + hciCmd);
-            return mStExtensions.transceive(pipe_id, hciCmd, dataIn);
+            Log.w(TAG, "transceive() -  Deprecated API, nothing done");
+            return null;
         }
 
         public void disconnectGate(int pipe_id) {
-            if (isNfcEnabled() == false) {
-                Log.e(TAG, "NFC is not enabled, ignore");
-                return;
-            }
-
-            NfcPermissions.enforceAdminPermissionsClient(mContext);
-
-            Log.i(TAG, "disconnectGate() - pipe_id =  " + pipe_id);
-            mStExtensions.disconnectGate(pipe_id);
+            Log.w(TAG, "disconnectGate() -  Deprecated API, nothing done");
         }
 
         public void setNciConfig(int param_id, byte[] param) {
@@ -3432,9 +3373,18 @@ public class NfcService implements DeviceHostListener {
 
         public int getAvailableHciHostList(byte[] nfceeId, byte[] conInfo) {
             if (isNfcEnabled() == false) {
-                Log.e(TAG, "NFC is not enabled, ignore");
+                Log.e(TAG, "getAvailableHciHostList() - NFC is not enabled, ignore");
                 return -1;
             }
+            if ((nfceeId.length != NFA_EE_MAX_EE_SUPPORTED)
+                    || (conInfo.length != NFA_EE_MAX_EE_SUPPORTED)) {
+                Log.e(
+                        TAG,
+                        "getAvailableHciHostList() - Wrong length of input param, expected "
+                                + NFA_EE_MAX_EE_SUPPORTED);
+                return -1;
+            }
+
             return mStExtensions.getAvailableHciHostList(nfceeId, conInfo);
         }
 
@@ -3759,6 +3709,16 @@ public class NfcService implements DeviceHostListener {
             Log.i(TAG, "unregisterNfcStackRestartCb()");
             mNfcStackRestartCb = null;
         }
+
+        @Override
+        public INfcNdefNfceeAdapter getNfcNdefNfceeAdapterInterface() {
+            NfcPermissions.enforceAdminPermissionsClient(mContext);
+
+            if (mNdefNfceeService == null) {
+                mNdefNfceeService = new NdefNfceeService();
+            }
+            return mNdefNfceeService;
+        }
     }
 
     private boolean muteARequested = false;
@@ -3939,19 +3899,88 @@ public class NfcService implements DeviceHostListener {
             return true;
         }
 
-        public void onStLogData(int logtype, byte[][] data) {
-            Log.d(TAG, "onStLogData : Number of entries = " + data.length);
-            synchronized (NfcWalletAdapterService.this) {
-                if (mLogCallback != null) {
-                    for (byte[] tlv : data) {
-                        try {
-                            mLogCallback.onFwLogReceived(logtype, tlv);
-                        } catch (RemoteException e) {
-                            // Ignore
+        private final ScheduledExecutorService mWalletCbScheduler =
+                Executors.newScheduledThreadPool(1);
+        private ScheduledFuture<?> mWalletCbScheduledTask = null;
+
+        String CB_LOG_DATA = "log_data";
+        String CB_INTF_ACTIVATED = "intf_activated";
+        String CB_ACTION_NTF = "action_ntf";
+        String CB_POLLING_LOOP = "polling_loop";
+
+        private class WalletCbRunnable implements Runnable {
+            private String mCbType = null;
+            private int mNfceeId;
+            private byte[] mData = null;
+            private int mLogType;
+            private byte[][] mLogData = null;
+            private String mPollingData = "";
+
+            public WalletCbRunnable(String type, Object param1, Object param2) {
+                mCbType = type;
+                if (type.contains(CB_LOG_DATA)) {
+                    mLogType = (int) param1;
+                    mLogData = (byte[][]) param2;
+                } else if (type.contains(CB_INTF_ACTIVATED)) {
+                    mData = (byte[]) param1;
+                } else if (type.contains(CB_ACTION_NTF)) {
+                    mNfceeId = (int) param1;
+                    mData = (byte[]) param2;
+                } else if (type.contains(CB_POLLING_LOOP)) {
+                    mPollingData = (String) param1;
+                }
+            }
+
+            @Override
+            public void run() {
+                Log.d(TAG, "WalletCbRunnable.run() - mCbType: " + mCbType);
+                synchronized (NfcWalletAdapterService.this) {
+                    if (mCbType.contains(CB_LOG_DATA)) {
+                        if (mLogCallback != null) {
+                            for (byte[] tlv : mLogData) {
+                                try {
+                                    mLogCallback.onFwLogReceived(mLogType, tlv);
+                                } catch (RemoteException e) {
+                                    // Ignore
+                                }
+                            }
+                        }
+                    } else if (mCbType.contains(CB_INTF_ACTIVATED)) {
+                        if (mIntfActivatedNtfCallback != null) {
+                            try {
+                                mIntfActivatedNtfCallback.onIntfActivatedNtfReceived(mData);
+                            } catch (RemoteException e) {
+                                // Ignore
+                            }
+                        }
+                    } else if (mCbType.contains(CB_ACTION_NTF)) {
+                        if (mActionNtfCallback != null) {
+                            try {
+                                mActionNtfCallback.onNfceeActionNtfReceived(mNfceeId, mData);
+                            } catch (RemoteException e) {
+                                // Ignore
+                            }
+                        }
+                    } else if (mCbType.contains(CB_POLLING_LOOP)) {
+                        if (mPollingLoopCallback != null) {
+                            try {
+                                mPollingLoopCallback.onPollingLoopInfoReceived(mPollingData);
+                            } catch (RemoteException e) {
+                                // Ignore
+                            }
                         }
                     }
                 }
             }
+        }
+
+        public void onStLogData(int logtype, byte[][] data) {
+            Log.d(TAG, "onStLogData : Number of entries = " + data.length);
+
+            final Runnable walletCb =
+                    new WalletCbRunnable(CB_LOG_DATA, (Object) logtype, (Object) data);
+            mWalletCbScheduledTask =
+                    mWalletCbScheduler.schedule(walletCb, 0, TimeUnit.MILLISECONDS);
         }
 
         public boolean unregisterStLogCallback() {
@@ -4006,6 +4035,8 @@ public class NfcService implements DeviceHostListener {
                 mDeviceHost.setNfceePowerAndLinkCtrl(getESEAlwaysOnStatus());
             }
 
+            mDeviceHost.commitRouting();
+
             return true;
         }
 
@@ -4026,15 +4057,10 @@ public class NfcService implements DeviceHostListener {
 
         public void onActionNtf(int nfcee, byte[] data) {
             Log.d(TAG, "onActionNtf");
-            synchronized (NfcWalletAdapterService.this) {
-                if (mActionNtfCallback != null) {
-                    try {
-                        mActionNtfCallback.onNfceeActionNtfReceived(nfcee, data);
-                    } catch (RemoteException e) {
-                        // Ignore
-                    }
-                }
-            }
+            final Runnable walletCb =
+                    new WalletCbRunnable(CB_ACTION_NTF, (Object) nfcee, (Object) data);
+            mWalletCbScheduledTask =
+                    mWalletCbScheduler.schedule(walletCb, 0, TimeUnit.MILLISECONDS);
         }
 
         public boolean unregisterNfceeActionNtfCallback() {
@@ -4066,15 +4092,9 @@ public class NfcService implements DeviceHostListener {
 
         public void onIntfActivatedNtfReceived(byte[] data) {
             Log.d(TAG, "onIntfActivatedNtfReceived()");
-            synchronized (NfcWalletAdapterService.this) {
-                if (mIntfActivatedNtfCallback != null) {
-                    try {
-                        mIntfActivatedNtfCallback.onIntfActivatedNtfReceived(data);
-                    } catch (RemoteException e) {
-                        // Ignore
-                    }
-                }
-            }
+            final Runnable walletCb = new WalletCbRunnable(CB_INTF_ACTIVATED, (Object) data, null);
+            mWalletCbScheduledTask =
+                    mWalletCbScheduler.schedule(walletCb, 0, TimeUnit.MILLISECONDS);
         }
 
         public boolean unregisterIntfActivatedNtfCallback() {
@@ -4585,15 +4605,10 @@ public class NfcService implements DeviceHostListener {
 
         public void onPollingLoopData(String data) {
             Log.d(TAG, "onPollingLoopData : " + data);
-            synchronized (NfcWalletAdapterService.this) {
-                if (mPollingLoopCallback != null) {
-                    try {
-                        mPollingLoopCallback.onPollingLoopInfoReceived(data);
-                    } catch (RemoteException e) {
-                        // Ignore
-                    }
-                }
-            }
+
+            final Runnable walletCb = new WalletCbRunnable(CB_POLLING_LOOP, (Object) data, null);
+            mWalletCbScheduledTask =
+                    mWalletCbScheduler.schedule(walletCb, 0, TimeUnit.MILLISECONDS);
         }
 
         public boolean unregisterPollingLoopCallback() {
@@ -5299,6 +5314,52 @@ public class NfcService implements DeviceHostListener {
         }
     }
 
+    class NdefNfceeService extends INfcNdefNfceeAdapter.Stub {
+        public boolean writeNdefData(byte[] fileId, byte[] data) {
+            if ((fileId == null) || (data == null)) {
+                Log.e(TAG, "NdefNfceeService.writeNdefData() - Null value");
+                return false;
+            }
+            return mStNdefNfcee.writeNdefData(fileId, data);
+        }
+
+        public byte[] readNdefData(byte[] fileId) {
+            if (fileId == null) {
+                Log.e(TAG, "NdefNfceeService.readNdefData() - Null fileId value");
+                return null;
+            }
+            return mStNdefNfcee.readNdefData(fileId);
+        }
+
+        public boolean lockNdefData(byte[] fileId, boolean lock) {
+            if (fileId == null) {
+                Log.e(TAG, "NdefNfceeService.lockNdefData() - Null fileId value");
+                return false;
+            }
+            return mStNdefNfcee.lockNdefData(fileId, lock);
+        }
+
+        public boolean isLockedNdefData(byte[] fileId) {
+            if (fileId == null) {
+                Log.e(TAG, "NdefNfceeService.isLockedNdefData() - Null fileId value");
+                return false;
+            }
+            return mStNdefNfcee.isLockedNdefData(fileId);
+        }
+
+        public boolean clearNdefData(byte[] fileId) {
+            if (fileId == null) {
+                Log.e(TAG, "NdefNfceeService.clearNdefData() - Null fileId value");
+                return false;
+            }
+            return mStNdefNfcee.clearNdefData(fileId);
+        }
+
+        public byte[] readT4tCcfile() {
+            return mStNdefNfcee.readT4tCcfile();
+        }
+    }
+
     class WatchDogThread extends Thread {
         final Object mCancelWaiter = new Object();
         final int mTimeout;
@@ -5667,7 +5728,18 @@ public class NfcService implements DeviceHostListener {
     int mResolvedDefaultAidRoute = 0;
 
     public void routeAids(String aid, int route, int aidInfo, int power) {
-        if (DBG)
+        // Get resolved default AID route
+        if (aid.contentEquals("")) {
+            if (DBG) {
+                Log.d(
+                        TAG,
+                        "routeAids() - Default AID route: "
+                                + String.format("0x%02X", route)
+                                + ", power: "
+                                + String.format("0x%02X", power));
+            }
+            mResolvedDefaultAidRoute = route;
+        } else if (DBG) {
             Log.d(
                     TAG,
                     "routeAids() - AID : "
@@ -5676,6 +5748,8 @@ public class NfcService implements DeviceHostListener {
                             + String.format("0x%02X", route)
                             + ", power: "
                             + String.format("0x%02X", power));
+        }
+
         Message msg = mHandler.obtainMessage();
         msg.what = MSG_ROUTE_AID;
         msg.arg1 = route;
@@ -5687,13 +5761,6 @@ public class NfcService implements DeviceHostListener {
         msg.setData(aidPowerState);
 
         mHandler.sendMessage(msg);
-
-        // Get resolved default AID route
-        if (aid.contentEquals("")) {
-            if (DBG)
-                Log.d(TAG, "routeAids() - Default AID route: " + String.format("0x%02X", route));
-            mResolvedDefaultAidRoute = route;
-        }
     }
 
     public void unrouteAids(String aid) {
@@ -6107,8 +6174,8 @@ public class NfcService implements DeviceHostListener {
         // If DH or unvalid value, use HCE
         int nciId = 0x00;
         int i;
-        byte[] nfceeid = new byte[3];
-        byte[] conInfo = new byte[3];
+        byte[] nfceeid = new byte[NFA_EE_MAX_EE_SUPPORTED];
+        byte[] conInfo = new byte[NFA_EE_MAX_EE_SUPPORTED];
         int num = mStExtensions.getAvailableHciHostList(nfceeid, conInfo);
 
         switch (id) {

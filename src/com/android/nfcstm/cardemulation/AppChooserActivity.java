@@ -267,9 +267,13 @@ public class AppChooserActivity extends AppCompatActivity
                 if (mIsPayment) {
                     view =
                             mInflater.inflate(
-                                    com.android.nfcstm.R.layout.cardemu_payment_item, parent, false);
+                                    com.android.nfcstm.R.layout.cardemu_payment_item,
+                                    parent,
+                                    false);
                 } else {
-                    view = mInflater.inflate(com.android.nfcstm.R.layout.cardemu_item, parent, false);
+                    view =
+                            mInflater.inflate(
+                                    com.android.nfcstm.R.layout.cardemu_item, parent, false);
                 }
                 final ViewHolder holder = new ViewHolder(view);
                 view.setTag(holder);
