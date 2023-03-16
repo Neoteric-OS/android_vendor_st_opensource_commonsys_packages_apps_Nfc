@@ -3060,7 +3060,7 @@ void NfcStExtensions::StHandleLogDataDynParams(uint8_t format,
     } break;
 
     case (DYN_ST_T1_IN_ROTATION):
-      U_FALLTHROUGH;
+      FALLTHROUGH;
     case (DYN_ST_T1_RUNNING): {
       switch (mDynFwSubState) {
         case (DYN_SST_IDLE):
@@ -3145,7 +3145,7 @@ void NfcStExtensions::StHandleLogDataDynParams(uint8_t format,
             }
               // fallback to CERx case if there was no error status.
               // (observer mode)
-              U_FALLTHROUGH;
+              FALLTHROUGH;
             case T_CERx: {
               // if length is 0, ignore
               if (!reallen) {
@@ -3559,7 +3559,7 @@ void NfcStExtensions::StMatchSelectSw(uint8_t format, uint16_t data_len,
       switch (t) {
         case T_fieldOff:
           mMatchSelectLastFieldOffTs = receivedFwts;
-          U_FALLTHROUGH;
+          FALLTHROUGH;
         case T_fieldLevel:
           mMatchSelectState = MATCH_SEL_ST_INITIAL;
           LOG_IF(INFO, nfc_debug_enabled)
@@ -3575,7 +3575,7 @@ void NfcStExtensions::StMatchSelectSw(uint8_t format, uint16_t data_len,
         }
           // fallback to T_CERx case if there was no error status.
           offset++;
-          U_FALLTHROUGH;
+          FALLTHROUGH;
         case T_CERx: {
           // Check if we go to ISO-DEP or not
           switch (p_data[2] & 0xF) {
@@ -3633,7 +3633,7 @@ void NfcStExtensions::StMatchSelectSw(uint8_t format, uint16_t data_len,
       switch (t) {
         case T_fieldOff:
           mMatchSelectLastFieldOffTs = receivedFwts;
-          U_FALLTHROUGH;
+          FALLTHROUGH;
         case T_fieldLevel:
           LOG_IF(INFO, nfc_debug_enabled)
               << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
@@ -3649,7 +3649,7 @@ void NfcStExtensions::StMatchSelectSw(uint8_t format, uint16_t data_len,
         }
           // fallback to T_CERx case if there was no error status.
           offset++;
-          U_FALLTHROUGH;
+          FALLTHROUGH;
         case T_CERx: {
           realLen = p_data[offset] << 8 | p_data[offset + 1];
           LOG_IF(INFO, nfc_debug_enabled)
@@ -3707,7 +3707,7 @@ void NfcStExtensions::StMatchSelectSw(uint8_t format, uint16_t data_len,
       switch (t) {
         case T_fieldOff:
           mMatchSelectLastFieldOffTs = receivedFwts;
-          U_FALLTHROUGH;
+          FALLTHROUGH;
         case T_fieldLevel:
           LOG_IF(INFO, nfc_debug_enabled)
               << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";

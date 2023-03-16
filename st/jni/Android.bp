@@ -13,7 +13,6 @@ cc_library_shared {
 
     shared_libs: [
         "libicu",
-        "libandroidicu",
         "libnativehelper",
         "libcutils",
         "libutils",

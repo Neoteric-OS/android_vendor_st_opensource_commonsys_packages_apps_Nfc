@@ -30,7 +30,6 @@ cc_library_static {
     ],
 
     shared_libs: [
-        "libandroidicu",
         "libnativehelper",
         "libcutils",
         "libutils",
@@ -76,7 +75,6 @@ cc_library_static {
       ],
       shared_libs : [
         "libnativehelper",
-        "libandroidicu",
         "libcutils",
         "libutils",
         "liblog",
