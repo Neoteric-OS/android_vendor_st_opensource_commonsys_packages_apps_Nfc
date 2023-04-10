@@ -1896,7 +1896,7 @@ public class NfcService implements DeviceHostListener {
                             ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED
                             : PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                     PackageManager.DONT_KILL_APP,
-                    uh.getIdentifier());
+                    uh.getIdentifier(), "null");
         } catch (RemoteException e) {
             Log.w(TAG, "Unable to change Beam status for user " + uh);
         }
