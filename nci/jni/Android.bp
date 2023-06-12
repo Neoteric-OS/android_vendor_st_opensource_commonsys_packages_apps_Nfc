@@ -21,7 +21,8 @@ cc_library_static {
         "PeerToPeer.cpp",
         "RouteDataSet.cpp",
         "PowerSwitch.cpp",
-        "NfcDta.cpp"
+        "NfcDta.cpp",
+        "NfcStatsUtil.cpp"
 		],
 
     export_include_dirs :
@@ -37,6 +38,7 @@ cc_library_static {
         "libstnfc-nci",
         "libchrome",
         "libbase",
+        "libstatslog_nfc_st",
     ],
 
     static_libs: ["libxml2"],
