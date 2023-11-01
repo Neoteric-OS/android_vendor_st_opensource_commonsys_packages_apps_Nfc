@@ -3238,6 +3238,21 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
             if (!mIsTagAppPrefSupported) throw new UnsupportedOperationException();
             return setTagAppPreferenceInternal(userId, pkg, allow);
         }
+
+        @Override
+        public boolean enableReaderOption(boolean enable) {
+            return false;
+        }
+
+        @Override
+        public boolean isReaderOptionSupported() {
+            return false;
+        }
+
+        @Override
+        public boolean isReaderOptionEnabled() {
+            return false;
+        }
     }
 
     final class SeServiceDeathRecipient implements IBinder.DeathRecipient {
