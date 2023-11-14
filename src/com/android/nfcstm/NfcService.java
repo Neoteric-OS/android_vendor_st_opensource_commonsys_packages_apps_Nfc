@@ -467,6 +467,8 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
             ("1".equals(android.os.SystemProperties.get("persist.st_nfc_charging")));
     public static final boolean HAS_ST_NDEF_NFCEE_SRV =
             ("1".equals(android.os.SystemProperties.get("persist.st_nfc_ndef_nfcee_service")));
+    public static final boolean HAS_ST_DELAY_POLLING_OFF =
+            ("1".equals(android.os.SystemProperties.get("persist.st_nfc_delay_polling_off")));
 
     RoutingTableParser mRoutingTableParser;
     boolean mIsDebugBuild;
@@ -692,11 +694,6 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
     public void onNfcTransactionEvent(byte[] aid, byte[] data, String seName) {
         byte[][] dataObj = {aid, data, seName.getBytes()};
         sendMessage(NfcService.MSG_TRANSACTION_EVENT, dataObj);
-        NfcStatsLog.write(
-                NfcStatsLog.NFC_CARDEMULATION_OCCURRED,
-                NfcStatsLog.NFC_CARDEMULATION_OCCURRED__CATEGORY__OFFHOST,
-                seName,
-		-1);
     }
 
     @Override
@@ -806,7 +803,16 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
 
     @Override
     public void onHwErrorReported() {
-        if (mIsRecovering == false) {
+        boolean isRecovering = false;
+        synchronized (NfcService.this) {
+            if (DBG) Log.d(TAG, "onHwErrorReported() - mIsRecovering: " + mIsRecovering);
+            isRecovering = mIsRecovering;
+            if (mIsRecovering == false) {
+                mIsRecovering = true;
+            }
+        }
+
+        if (isRecovering == false) {
             if (DBG) Log.d(TAG, "onHwErrorReported() - Restarting NFC Service");
 
             try {
@@ -817,8 +823,6 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
                         "onHwErrorReported() - Failed to unregisterScreenState BroadCastReceiver: "
                                 + e);
             }
-
-            mIsRecovering = true;
 
             if (mNfcStackRestartCb != null) {
                 // Inform any listening app
@@ -1073,8 +1077,8 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
             ServiceManager.addService(
                     NfcSettingsAdapter.SERVICE_SETTINGS_NAME, mNfcSettingsAdapterService);
         }
+        mStExtras = new StExtrasService();
         if (HAS_ST_EXTENSIONS) {
-            mStExtras = new StExtrasService();
             ServiceManager.addService(NfcAdapterStExtensions.SERVICE_NAME, mStExtras);
         }
         /* for MINT only */
@@ -1714,7 +1718,9 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
                 filter.addAction(Intent.ACTION_POWER_CONNECTED);
                 filter.addAction(Intent.ACTION_POWER_DISCONNECTED);
                 mContext.registerReceiverForAllUsers(mReceiver, filter, null, null);
-                mIsRecovering = false;
+                synchronized (NfcService.this) {
+                    mIsRecovering = false;
+                }
             }
 
             if (DBG) Log.d(TAG, "EnableDisableTask - enableInternal(end)");
@@ -2685,7 +2691,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
         }
 
         public IBinder getNfcAdapterVendorInterface(String vendor) {
-              return null;
+            return null;
         }
 
         @Override
@@ -6361,8 +6367,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
                                 return;
                             }
 
-                            if (DBG)
-                                Log.d(TAG, "NfcServiceHandler - handleMessage(MSG_ROUTE_AID)");
+                            if (DBG) Log.d(TAG, "NfcServiceHandler - handleMessage(MSG_ROUTE_AID)");
                             int route = msg.arg1;
                             int aidInfo = msg.arg2;
                             String aid = (String) msg.obj;
@@ -7196,15 +7201,21 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
                                 int delayTime = mPollDelayTime;
                                 mPollDelayed = true;
                                 mDeviceHost.startStopPolling(false);
-                                if (mPollDelayCount < mPollDelayCountMax) {
-                                    mPollDelayCount++;
+                                if (HAS_ST_DELAY_POLLING_OFF) {
+                                    delayTime = 2200;
                                 } else {
-                                    delayTime = mPollDelayTimeLong;
+                                    if (mPollDelayCount < mPollDelayCountMax) {
+                                        mPollDelayCount++;
+                                    } else {
+                                        delayTime = mPollDelayTimeLong;
+                                    }
                                 }
                                 if (DBG)
                                     Log.d(
                                             TAG,
-                                            "dispatchTagEndpoint() - Polling delayed " + delayTime);
+                                            "dispatchTagEndpoint() - Delaying polling of "
+                                                    + delayTime
+                                                    + " ms");
                                 mHandler.sendMessageDelayed(
                                         mHandler.obtainMessage(MSG_DELAY_POLLING), delayTime);
                             } else {
