@@ -919,6 +919,12 @@ public class CardEmulationManager
                                 + (defaultComponent != null ? true : false));
             return defaultComponent != null ? true : false;
         }
+
+        @Override
+        public boolean setServiceObserveModeDefault(int userId, ComponentName service, boolean enable) {
+	    // TODO Implement me
+            return false;
+        }
     }
 
     /**
