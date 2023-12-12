@@ -69,6 +69,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.android.nfcstm.R;
+
 /**
  * CardEmulationManager is the central entity responsible for delegating to individual components
  * implementing card emulation: - RegisteredServicesCache keeping track of HCE and SE services on
@@ -890,6 +892,18 @@ public class CardEmulationManager
             StApduServiceInfo stService =
                     mServiceCache.getStService(userId, mAidCache.getPreferredService());
             return (stService != null) ? stService.createApduServiceInfo() : null;
+        }
+
+        @Override
+        public boolean setServiceEnabledForCategoryOther(int userId,
+                ComponentName app, boolean status) throws RemoteException {
+            // KEYSTONE(Id311a2464665c1b15a74b9e2489c86ffd0eed7a3, b/311571903)
+            // commented out because enable_service_for_category_other not found
+            if (!mContext.getResources().getBoolean(R.bool.enable_service_for_category_other))
+                return false;
+            NfcPermissions.enforceUserPermissions(mContext);
+
+            return mServiceCache.registerOtherForService(userId, app, status);
         }
 
         @Override
