@@ -86,6 +86,8 @@ import android.nfc.INfcControllerAlwaysOnListener;
 import android.nfc.INfcDta;
 import android.nfc.INfcFCardEmulation;
 import android.nfc.INfcTag;
+import android.nfc.INfcWlcStateListener;
+import android.nfc.WlcLDeviceInfo;
 import com.st.android.nfc_extensions.ByteArray;
 import com.st.android.nfc_extensions.StConstants;
 import com.st.android.nfc_extensions.StApduServiceInfo;
@@ -3269,6 +3271,31 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
 
         @Override
         public boolean isReaderOptionEnabled() {
+            return false;
+        }
+
+        @Override
+        public void registerWlcStateListener(
+            INfcWlcStateListener listener) throws RemoteException {
+        }
+
+        @Override
+        public void unregisterWlcStateListener(
+            INfcWlcStateListener listener) throws RemoteException {
+        }
+
+        @Override
+        public WlcLDeviceInfo getWlcLDeviceInfo() {
+            return null;
+        }
+
+        @Override
+        public boolean isWlcEnabled() throws RemoteException {
+            return false;
+        }
+
+        @Override
+        public boolean enableWlc(boolean enable) {
             return false;
         }
     }
