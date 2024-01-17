@@ -46,6 +46,7 @@ import android.content.pm.PackageManager.ResolveInfoFlags;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
 import android.net.Uri;
+import android.nfc.cardemulation.ApduServiceInfo;
 import android.nfc.cardemulation.CardEmulation;
 import android.nfc.cardemulation.HostApduService;
 import android.nfc.cardemulation.OffHostApduService;
@@ -1210,6 +1211,41 @@ public class RegisteredServicesCache {
         }
     }
 
+    public boolean registerOtherForService(int userId,
+            ComponentName componentName, boolean checked) {
+        if (DBG) Log.d(TAG, "[register other] checked:" + checked + ", "  + componentName);
+
+        ArrayList<StApduServiceInfo> newServices = null;
+        boolean success = false;
+
+        synchronized (mLock) {
+
+            Log.d(TAG, "registerOtherForService / ComponentName" + componentName);
+            StApduServiceInfo serviceInfo = getStService(userId, componentName);
+
+            if (serviceInfo == null) {
+                Log.e(TAG, "Service " + componentName + "does not exist");
+                return false;
+            }
+
+            success = updateOtherServiceStatus(userId, serviceInfo, checked);
+
+            if (success) {
+                UserServices userService = findOrCreateUserLocked(userId);
+                newServices = new ArrayList<StApduServiceInfo>(userService.services.values());
+            } else {
+                Log.e(TAG, "Fail to other checked");
+            }
+        }
+
+        if (success) {
+            if (DBG) Log.d(TAG, "other list update due to User Select " + componentName);
+            mCallback.onServicesUpdated(userId, Collections.unmodifiableList(newServices),false);
+        }
+
+        return success;
+    }
+
     public StAidGroup getAidGroupForService(
             int userId, int uid, ComponentName componentName, String category) {
         if (DBG)
@@ -1323,6 +1359,28 @@ public class RegisteredServicesCache {
         } else {
             if (DBG) Log.d(TAG, "updateStatusOfServices() - No registered services");
         }
+    }
+
+    private boolean updateOtherServiceStatus(int userId, StApduServiceInfo service, boolean checked) {
+        UserServices userServices = findOrCreateUserLocked(userId);
+
+        // OtherServiceStatus status = userServices.others.get(service.getComponent());
+        // //This is Error handling code if otherServiceStatus is null
+        // if (status == null) {
+        //     Log.d(TAG, service.getComponent() + " status is could not be null");
+        //     return false;
+        // }
+
+        // if (service.isSelectedOtherService() == checked) {
+        //     Log.d(TAG, "already same status: " + checked);
+        //     return false;
+        // }
+
+        // service.setOtherServiceState(checked);
+        // status.checked = checked;
+
+        // return writeOthersLocked();
+        return false;
     }
 
     /**
