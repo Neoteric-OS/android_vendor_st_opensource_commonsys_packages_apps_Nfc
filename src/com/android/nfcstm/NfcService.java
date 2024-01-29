@@ -3290,6 +3290,10 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
         }
 
         @Override
+        public void notifyPollingLoop(Bundle frame) {
+        }
+
+        @Override
         public WlcLDeviceInfo getWlcLDeviceInfo() {
             return null;
         }
