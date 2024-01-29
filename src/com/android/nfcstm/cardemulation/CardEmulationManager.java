@@ -34,6 +34,8 @@
  */
 package com.android.nfcstm.cardemulation;
 
+import android.annotation.TargetApi;
+import android.annotation.FlaggedApi;
 import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -711,6 +713,21 @@ public class CardEmulationManager
             NfcService.getInstance()
                     .onPreferredPaymentChanged(NfcAdapter.PREFERRED_PAYMENT_UPDATED);
             return true;
+        }
+
+        @Override
+        @TargetApi(35)
+        @FlaggedApi(android.nfc.Flags.FLAG_NFC_READ_POLLING_LOOP)
+        public boolean registerPollingLoopFilterForService(int userId,
+                ComponentName service, String pollingLoopFilter) throws RemoteException {
+            NfcPermissions.validateUserId(userId);
+            NfcPermissions.enforceUserPermissions(mContext);
+            if (!isServiceRegistered(userId, service)) {
+                Log.e(TAG, "service ("+ service + ") isn't registed for user " + userId);
+                return false;
+            }
+            return mServiceCache.registerPollingLoopFilterForService(userId, Binder.getCallingUid(),
+            service, pollingLoopFilter);
         }
 
         @Override

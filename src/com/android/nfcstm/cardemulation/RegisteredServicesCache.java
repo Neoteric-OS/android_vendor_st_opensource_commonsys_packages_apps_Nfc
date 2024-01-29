@@ -34,6 +34,8 @@
  */
 package com.android.nfcstm.cardemulation;
 
+import android.annotation.TargetApi;
+import android.annotation.FlaggedApi;
 import android.app.ActivityManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -1124,6 +1126,39 @@ public class RegisteredServicesCache {
         }
         invalidateCache(ActivityManager.getCurrentUser(), false);
         return (success ? 0x00 : 0xFF);
+    }
+
+    @TargetApi(35)
+    @FlaggedApi(android.nfc.Flags.FLAG_NFC_READ_POLLING_LOOP)
+    public boolean registerPollingLoopFilterForService(int userId, int uid,
+            ComponentName componentName, String pollingLoopFilter) {
+//        ArrayList<ApduServiceInfo> newServices = null;
+//        synchronized (mLock) {
+//            UserServices services = findOrCreateUserLocked(userId);
+//            // Check if we can find this service
+//            ApduServiceInfo serviceInfo = getService(userId, componentName);
+//            if (serviceInfo == null) {
+//                Log.e(TAG, "Service " + componentName + " does not exist.");
+//                return false;
+//            }
+//            if (serviceInfo.getUid() != uid) {
+//                // This is probably a good indication something is wrong here.
+//                // Either newer service installed with different uid (but then
+//                // we should have known about it), or somebody calling us from
+//                // a different uid.
+//                Log.e(TAG, "UID mismatch.");
+//                return false;
+//            }
+//            if (!CardEmulation.isValidPollingLoopFilter(pollingLoopFilter)) {
+//                Log.e(TAG, "invalid polling loop filter");
+//                return false;
+//            }
+//            serviceInfo.addPollingLoopFilter(pollingLoopFilter);
+//            newServices = new ArrayList<ApduServiceInfo>(services.services.values());
+//        }
+//        mCallback.onServicesUpdated(userId, newServices, true);
+//        return true;
+          return false;
     }
 
     public boolean registerAidGroupForService(

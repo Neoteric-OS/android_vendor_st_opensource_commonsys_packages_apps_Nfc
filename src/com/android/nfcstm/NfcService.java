@@ -3294,6 +3294,10 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
         }
 
         @Override
+        public void notifyHceDeactivated() {
+        }
+
+        @Override
         public WlcLDeviceInfo getWlcLDeviceInfo() {
             return null;
         }
