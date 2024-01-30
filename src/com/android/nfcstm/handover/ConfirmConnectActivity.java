@@ -81,7 +81,7 @@ public class ConfirmConnectActivity extends Activity {
         mAlert.show();
 
         registerReceiver(
-                mReceiver, new IntentFilter(BluetoothPeripheralHandover.ACTION_TIMEOUT_CONNECT));
+                mReceiver, new IntentFilter(BluetoothPeripheralHandover.ACTION_TIMEOUT_CONNECT), Context.RECEIVER_EXPORTED);
     }
 
     @Override

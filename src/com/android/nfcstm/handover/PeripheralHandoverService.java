@@ -143,7 +143,7 @@ public class PeripheralHandoverService extends Service
         mNfcAdapter = NfcAdapter.getDefaultAdapter(getApplicationContext());
 
         IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
-        registerReceiver(mBluetoothStatusReceiver, filter);
+        registerReceiver(mBluetoothStatusReceiver, filter, Context.RECEIVER_EXPORTED);
     }
 
     @Override
