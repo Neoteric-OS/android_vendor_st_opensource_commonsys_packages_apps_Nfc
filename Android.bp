@@ -19,6 +19,8 @@ android_app {
         "nci/src/com/android/nfcstm/dhimpl/NativeLlcpSocket.java",
         "nci/src/com/android/nfcstm/dhimpl/NativeP2pDevice.java",
         ":statslog-st-Nfc-java-gen",
+        // Temp hack until NFC APK can link against module_current.
+        ":framework-nfc-updatable-sources",
     ],
 
     owner: "st",
@@ -36,6 +38,8 @@ android_app {
 
     libs: [
         "com.st.android.nfc_extensions",
+        "framework-nfc.impl",
+        "unsupportedappusage",
     ],
 
 	uses_libs: [

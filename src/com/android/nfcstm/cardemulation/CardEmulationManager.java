@@ -34,6 +34,8 @@
  */
 package com.android.nfcstm.cardemulation;
 
+import android.annotation.TargetApi;
+import android.annotation.FlaggedApi;
 import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -714,6 +716,21 @@ public class CardEmulationManager
         }
 
         @Override
+        @TargetApi(35)
+        @FlaggedApi(android.nfc.Flags.FLAG_NFC_READ_POLLING_LOOP)
+        public boolean registerPollingLoopFilterForService(int userId,
+                ComponentName service, String pollingLoopFilter) throws RemoteException {
+            NfcPermissions.validateUserId(userId);
+            NfcPermissions.enforceUserPermissions(mContext);
+            if (!isServiceRegistered(userId, service)) {
+                Log.e(TAG, "service ("+ service + ") isn't registed for user " + userId);
+                return false;
+            }
+            return mServiceCache.registerPollingLoopFilterForService(userId, Binder.getCallingUid(),
+            service, pollingLoopFilter);
+        }
+
+        @Override
         public boolean setOffHostForService(int userId, ComponentName service, String offHostSE) {
             if (DBG && (service != null))
                 Log.d(
@@ -923,6 +940,18 @@ public class CardEmulationManager
         @Override
         public boolean setServiceObserveModeDefault(int userId, ComponentName service, boolean enable) {
 	    // TODO Implement me
+            return false;
+        }
+
+        @Override
+        public boolean overrideRoutingTable(int userHandle, String protocol, String technology) {
+            // TODO Implement me
+                return false;
+        }
+
+        @Override
+        public boolean recoverRoutingTable(int userHandle) {
+        // TODO Implement me
             return false;
         }
     }
