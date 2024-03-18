@@ -938,7 +938,7 @@ public class CardEmulationManager
         }
 
         @Override
-        public boolean setServiceObserveModeDefault(int userId, ComponentName service, boolean enable) {
+        public boolean setDefaultToObserveModeForService(int userId, ComponentName service, boolean enable) {
 	    // TODO Implement me
             return false;
         }
