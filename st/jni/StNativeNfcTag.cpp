@@ -24,6 +24,7 @@
 #include <signal.h>
 #include <string.h>
 #include <time.h>
+#include <vector>
 
 #include "IntervalTimer.h"
 #include "JavaClassConstants.h"
@@ -91,7 +92,7 @@ static bool sCheckNdefCapable = false;  // whether tag has NDEF capability
 static tNFA_HANDLE sNdefTypeHandlerHandle = NFA_HANDLE_INVALID;
 static tNFA_INTF_TYPE sCurrentRfInterface = NFA_INTERFACE_ISO_DEP;
 static tNFA_INTF_TYPE sCurrentActivatedProtocl = NFA_INTERFACE_ISO_DEP;
-static std::basic_string<uint8_t> sRxDataBuffer;
+static std::vector<uint8_t> sRxDataBuffer;
 static tNFA_STATUS sRxDataStatus = NFA_STATUS_OK;
 static bool sWaitingForTransceive = false;
 static bool sTransceiveRfTimeout = false;
@@ -1400,7 +1401,7 @@ void nativeNfcTag_doTransceiveStatus(tNFA_STATUS status, uint8_t* buf,
     }
     sRxDataStatus = status;
     if (sRxDataStatus == NFA_STATUS_OK || sRxDataStatus == NFC_STATUS_CONTINUE)
-      sRxDataBuffer.append(buf, bufLen);
+      sRxDataBuffer.insert(sRxDataBuffer.end(), buf, buf+bufLen);
 
     if (sRxDataStatus == NFA_STATUS_OK) sTransceiveEvent.notifyOne();
   } while (0);
@@ -1567,7 +1568,7 @@ static jbyteArray nativeNfcTag_doTransceive(JNIEnv* e, jobject o,
           // Workaround for wechat... return an empty buffer
           DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
               "%s; isSendingSelectApdu change buffer", __func__);
-          sRxDataBuffer.insert(1, 0x10, 0);
+          sRxDataBuffer.insert(sRxDataBuffer.end(), 0x10, 0);
           transDataLen = 0x10;
         }
 
