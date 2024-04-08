@@ -719,7 +719,7 @@ public class CardEmulationManager
         @TargetApi(35)
         @FlaggedApi(android.nfc.Flags.FLAG_NFC_READ_POLLING_LOOP)
         public boolean registerPollingLoopFilterForService(int userId,
-                ComponentName service, String pollingLoopFilter) throws RemoteException {
+                ComponentName service, String pollingLoopFilter, boolean autoTransact) throws RemoteException {
             NfcPermissions.validateUserId(userId);
             NfcPermissions.enforceUserPermissions(mContext);
             if (!isServiceRegistered(userId, service)) {
@@ -728,6 +728,30 @@ public class CardEmulationManager
             }
             return mServiceCache.registerPollingLoopFilterForService(userId, Binder.getCallingUid(),
             service, pollingLoopFilter);
+        }
+
+        @Override
+        @FlaggedApi(android.nfc.Flags.FLAG_NFC_READ_POLLING_LOOP)
+        public boolean removePollingLoopFilterForService(int userId, ComponentName service,
+                String pollingLoopFilter) throws RemoteException {
+           // Needs implementation
+           return true;
+        }
+
+        @Override
+        @FlaggedApi(android.nfc.Flags.FLAG_NFC_READ_POLLING_LOOP)
+        public boolean registerPollingLoopPatternFilterForService(int userId, ComponentName service,
+                String pollingLoopPatternFilter, boolean autoTransact) throws RemoteException {
+           // Needs implementation
+           return true;
+        }
+
+        @Override
+        @FlaggedApi(android.nfc.Flags.FLAG_NFC_READ_POLLING_LOOP)
+        public boolean removePollingLoopPatternFilterForService(int userId, ComponentName service,
+                String pollingLoopPatternFilter) throws RemoteException {
+           // Needs implementation
+          return true;
         }
 
         @Override
@@ -938,8 +962,8 @@ public class CardEmulationManager
         }
 
         @Override
-        public boolean setDefaultToObserveModeForService(int userId, ComponentName service, boolean enable) {
-	    // TODO Implement me
+        public boolean setShouldDefaultToObserveModeForService(int userId, ComponentName service, boolean enable) {
+        // TODO Implement me
             return false;
         }
 
