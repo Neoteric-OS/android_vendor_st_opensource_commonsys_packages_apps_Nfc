@@ -85,6 +85,7 @@ import android.nfc.INfcCardEmulation;
 import android.nfc.INfcControllerAlwaysOnListener;
 import android.nfc.INfcDta;
 import android.nfc.INfcFCardEmulation;
+import android.nfc.INfcOemExtensionCallback;
 import android.nfc.INfcTag;
 import android.nfc.INfcVendorNciCallback;
 import android.nfc.INfcWlcStateListener;
@@ -588,6 +589,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
     private final boolean mIsAlwaysOnSupported;
     private final Set<INfcControllerAlwaysOnListener> mAlwaysOnListeners =
             Collections.synchronizedSet(new HashSet<>());
+    private  INfcOemExtensionCallback mNfcOemExtensionCallback = null;
 
     public static NfcService getInstance() {
         return sService;
@@ -2702,8 +2704,31 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
 	    return 0;
 	}
 
+       @Override
+        public void registerOemExtensionCallback(INfcOemExtensionCallback callbacks)
+                throws RemoteException {
+            if (DBG) Log.i(TAG, "Register the oem extension callback");
+            NfcPermissions.enforceAdminPermissions(mContext);
+            mNfcOemExtensionCallback = callbacks;
+        }
+
         @Override
-        public boolean enable() throws RemoteException {
+        public void unregisterOemExtensionCallback(INfcOemExtensionCallback callbacks)
+                throws RemoteException {
+            if (DBG) Log.i(TAG, "Unregister the oem extension callback");
+            NfcPermissions.enforceAdminPermissions(mContext);
+            mNfcOemExtensionCallback = null;
+        }
+
+        @Override
+        public void clearPreference() throws RemoteException {
+            if (DBG) Log.i(TAG, "clearPreference");
+            NfcPermissions.enforceAdminPermissions(mContext);
+            // TODO: Implement this.
+        }
+
+	@Override
+        public boolean enable(String pkg) throws RemoteException {
             if (DBG) Log.d(TAG, "NfcAdapterService - enable()");
             NfcPermissions.enforceAdminPermissions(mContext);
 
@@ -2717,7 +2742,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
         }
 
         @Override
-        public boolean disable(boolean saveState) throws RemoteException {
+        public boolean disable(boolean saveState, String pkg) throws RemoteException {
             if (DBG) Log.d(TAG, "NfcAdapterService - disable() - saveState:" + saveState);
             NfcPermissions.enforceAdminPermissions(mContext);
 
