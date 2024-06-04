@@ -180,7 +180,7 @@ public class BluetoothPeripheralHandover implements BluetoothProfile.ServiceList
         filter.addAction(ACTION_ALLOW_CONNECT);
         filter.addAction(ACTION_DENY_CONNECT);
 
-        mContext.registerReceiver(mReceiver, filter);
+        mContext.registerReceiver(mReceiver, filter, Context.RECEIVER_EXPORTED);
 
         mHandler.sendMessageDelayed(mHandler.obtainMessage(MSG_TIMEOUT), TIMEOUT_MS);
 
