@@ -2681,7 +2681,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
         }
 
         @Override
-        public boolean setObserveMode(boolean enable) {
+        public synchronized boolean setObserveMode(boolean enable, String packageName) {
 	        // TODO Implement me
             return false;
         }
