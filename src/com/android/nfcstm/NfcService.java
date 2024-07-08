@@ -2681,7 +2681,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
         }
 
         @Override
-        public boolean setObserveMode(boolean enable) {
+        public synchronized boolean setObserveMode(boolean enable, String packageName) {
 	        // TODO Implement me
             return false;
         }
@@ -2726,6 +2726,20 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
             if (DBG) Log.i(TAG, "clearPreference");
             NfcPermissions.enforceAdminPermissions(mContext);
             // TODO: Implement this.
+        }
+
+        @Override
+        public void setScreenState() throws RemoteException {
+            if (DBG) Log.i(TAG, "setScreenState");
+            NfcPermissions.enforceAdminPermissions(mContext);
+            applyScreenState(mScreenStateHelper.checkScreenState());
+        }
+
+        @Override
+        public void checkFirmware() throws RemoteException {
+            if (DBG) Log.i(TAG, "checkFirmware");
+            NfcPermissions.enforceAdminPermissions(mContext);
+            mDeviceHost.checkFirmware();
         }
 
 	@Override
