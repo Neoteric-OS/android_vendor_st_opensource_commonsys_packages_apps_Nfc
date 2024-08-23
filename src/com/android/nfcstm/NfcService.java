@@ -3359,6 +3359,14 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
         public void notifyPollingLoop(PollingFrame frame) {
         }
 
+         /**
+         * Notifies the system of new HCE data for tests.
+         *
+         * @hide
+         */
+        public void notifyTestHceData(int technology, byte[] data) {
+        }
+
         @Override
         public void notifyHceDeactivated() {
         }
