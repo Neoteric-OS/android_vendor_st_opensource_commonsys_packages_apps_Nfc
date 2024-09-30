@@ -2722,11 +2722,6 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
         }
 
         @Override
-        public List<String> fetchActiveNfceeList() throws RemoteException {
-            return new ArrayList<String>();
-        }
-
-	@Override
         public void clearPreference() throws RemoteException {
             if (DBG) Log.i(TAG, "clearPreference");
             NfcPermissions.enforceAdminPermissions(mContext);
@@ -3336,7 +3331,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
         }
 
         @Override
-        public boolean enableReaderOption(boolean enable, String pkg) {
+        public boolean enableReaderOption(boolean enable) {
             return false;
         }
 
