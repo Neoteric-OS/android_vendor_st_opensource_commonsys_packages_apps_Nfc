@@ -1,12 +1,29 @@
+/*
+ * Copyright (C) 2018 ST Microelectronics S.A.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 package com.android.nfcstm.st;
 
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.SystemProperties;
 import android.util.Log;
+
 import com.android.nfcstm.NfcService;
 import com.android.nfcstm.dhimpl.NativeNfcStExtensions;
 import com.android.nfcstm.dhimpl.StNativeNfcManager;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -390,8 +407,8 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                 mSim2Presence = NfcSimStateObserver.STATE_PRESENT_READY;
                 Log.d(
                         TAG,
-                        "init() - persist.st_nfc_ignore_modem=1 ==> ignore all SIM state from modem "
-                                + "for certif");
+                        "init() - persist.st_nfc_ignore_modem=1 ==> ignore all SIM state from modem"
+                                + " for certif");
             } else if (SystemProperties.get("persist.st_nfc_ignore_modem_sim1").equals("1")) {
                 mSim1Presence = NfcSimStateObserver.STATE_ABSENT;
                 Log.d(TAG, "init() - persist.st_nfc_ignore_modem_sim1=1");

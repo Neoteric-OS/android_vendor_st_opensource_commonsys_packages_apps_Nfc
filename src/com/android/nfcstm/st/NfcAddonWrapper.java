@@ -1,3 +1,18 @@
+/*
+ * Copyright (C) 2018 ST Microelectronics S.A.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 package com.android.nfcstm.st;
 
 import android.content.Context;
@@ -6,11 +21,13 @@ import android.content.pm.PackageManager;
 import android.os.RemoteCallbackList;
 import android.os.RemoteException;
 import android.util.Log;
+
 import com.android.nfcstm.NfcService;
 import com.android.nfcstm.dhimpl.NativeNfcStExtensions;
 import com.android.nfcstm.dhimpl.StNativeNfcManager;
+
 import com.st.android.nfc_extensions.INfcSettingsCallback;
-import com.st.android.nfc_extensions.NfcSettingsAdapter;
+
 import java.util.List;
 
 public class NfcAddonWrapper implements ISeController.Callback {
@@ -18,10 +35,6 @@ public class NfcAddonWrapper implements ISeController.Callback {
     private static final String TAG = "StNfcAddonWrapper";
 
     public static final String PREF = "NfcServicePrefs";
-
-    public static final String PREF_MODE_READER = "nfc.pref.mode.reader";
-    public static final String PREF_MODE_P2P = "nfc.pref.mode.p2p";
-    public static final String PREF_MODE_HCE = "nfc.pref.mode.card";
 
     static final String PREF_NFC_ON = "nfc_on";
 
@@ -46,9 +59,6 @@ public class NfcAddonWrapper implements ISeController.Callback {
         mSecureElementSelector =
                 new SecureElementSelector(
                         mContext, mNativeNfcManager, mStExtensions, NfcService.getInstance(), this);
-        if (NfcService.getInstance().HAS_ST_CHARGING_CAP) {
-            NfcCharging.createSingleton(context, mNativeNfcManager, mStExtensions);
-        }
     }
 
     public static void createSingleton(
@@ -66,61 +76,9 @@ public class NfcAddonWrapper implements ISeController.Callback {
 
     public void applyInitializeSequence() {
         PackageManager pm = mContext.getPackageManager();
-        boolean isHceCapable = pm.hasSystemFeature(PackageManager.FEATURE_NFC_HOST_CARD_EMULATION);
 
-        boolean isHceOn = false;
-
-        if (isHceCapable) {
-            Log.d(TAG, "applyInitializeSequence() - isHceCapable=1");
-
-            // ContentResolver mContentResolver = mContext.getContentResolver();
-            int hceFlag = mPrefs.getInt(PREF_MODE_HCE, NfcSettingsAdapter.FLAG_ON);
-            if (hceFlag == 1) {
-                isHceOn = true;
-            }
-        } else {
-            mPrefsEditor.putInt(PREF_MODE_HCE, NfcSettingsAdapter.FLAG_OFF);
-            mPrefsEditor.apply();
-        }
-
-        Log.d(TAG, "applyInitializeSequence() - isHceOn = " + isHceOn);
-        // Settings.Global.NFC_HCE_ON to "nfc_hce_on"
-        int mode = 0;
-        if (mPrefs.getInt(PREF_MODE_READER, NfcSettingsAdapter.FLAG_ON)
-                == NfcSettingsAdapter.FLAG_ON) {
-            mode |= NfcSettingsAdapter.MODE_READER;
-        }
-
-        mPrefsEditor.putInt(PREF_MODE_P2P, NfcSettingsAdapter.FLAG_OFF);
-        mPrefsEditor.apply();
-
-        if (isHceOn) {
-            mode |= NfcSettingsAdapter.MODE_HCE;
-        }
-
-        Log.d(TAG, "applyInitializeSequence() - mode:" + mode);
-
+        Log.d(TAG, "applyInitializeSequence()");
         mSecureElementSelector.init();
-
-        // Retrieve current RfConfiguration
-        byte[] techArray = new byte[4];
-        int modeBitmap = mStExtensions.getRfConfiguration(techArray);
-
-        if ((mode & NfcSettingsAdapter.MODE_READER) != 0) {
-            modeBitmap |= 0x1;
-        } else {
-            modeBitmap &= ~0x1;
-        }
-        if ((mode & NfcSettingsAdapter.MODE_HCE) != 0) {
-            modeBitmap |= 0x2;
-        } else {
-            modeBitmap &= ~0x2;
-        }
-
-        modeBitmap &= ~0x4;
-        modeBitmap &= ~0x8;
-
-        mStExtensions.setRfConfiguration(modeBitmap, techArray);
     }
 
     public boolean EnableSecureElement(String SeId, boolean enable) {
@@ -167,108 +125,5 @@ public class NfcAddonWrapper implements ISeController.Callback {
             }
         }
         mSettingsCallbacks.finishBroadcast();
-    }
-
-    // Nfc Framework API
-    public int getModeFlag(int mode, Object syncObj) {
-        Log.d(TAG, "getModeFlag() - mode = " + mode);
-        int flag = -1;
-        synchronized (syncObj) {
-            if (NfcSettingsAdapter.MODE_READER == mode) {
-                flag = mPrefs.getInt(PREF_MODE_READER, NfcSettingsAdapter.FLAG_ON);
-            } else if (NfcSettingsAdapter.MODE_P2P == mode) {
-                flag = mPrefs.getInt(PREF_MODE_P2P, NfcSettingsAdapter.FLAG_ON);
-            } else if (NfcSettingsAdapter.MODE_HCE == mode) {
-                flag = mPrefs.getInt(PREF_MODE_HCE, NfcSettingsAdapter.FLAG_ON);
-            }
-        }
-        Log.d(TAG, "getModeFlag() - return = " + flag);
-        return flag;
-    }
-
-    // Nfc Framework API
-    public void setModeFlag(boolean isNfcEnabled, int mode, int flag, Object syncObj) {
-        PackageManager pm = mContext.getPackageManager();
-        Log.d(
-                TAG,
-                "setModeFlag() - isNfcEnabled = "
-                        + isNfcEnabled
-                        + ", mode = "
-                        + mode
-                        + ", flag = "
-                        + flag
-                        + ", syncObj = "
-                        + syncObj);
-
-        // Retrieve current RfConfiguration
-        byte[] techArray = new byte[4];
-        int modeBitmap = 0x00;
-        if (isNfcEnabled) {
-            modeBitmap = mStExtensions.getRfConfiguration(techArray);
-        }
-
-        synchronized (syncObj) {
-            if ((mode
-                                    > (NfcSettingsAdapter.MODE_READER
-                                            | NfcSettingsAdapter.MODE_P2P
-                                            | NfcSettingsAdapter.MODE_HCE)
-                            || mode < 0)
-                    || (flag != NfcSettingsAdapter.FLAG_ON
-                            && flag != NfcSettingsAdapter.FLAG_OFF)) {
-                Log.d(
-                        TAG,
-                        "setModeFlag() - incorrect mode:" + mode + " or flag:" + flag + ", return");
-                return;
-            }
-
-            if ((mode & NfcSettingsAdapter.MODE_READER) != 0) {
-                mPrefsEditor.putInt(PREF_MODE_READER, flag);
-                mPrefsEditor.apply();
-
-                if (flag == NfcSettingsAdapter.FLAG_OFF) {
-                    modeBitmap &= ~0x1;
-                } else {
-                    modeBitmap |= 0x1;
-                }
-            }
-
-            if ((mode & NfcSettingsAdapter.MODE_P2P) != 0) {
-                if (!pm.hasSystemFeature(PackageManager.FEATURE_NFC_BEAM)) {
-                    Log.w(TAG, "setModeFlag() - P2P requested but feature unavailable");
-                } else {
-                    mPrefsEditor.putInt(PREF_MODE_P2P, flag);
-                    mPrefsEditor.apply();
-
-                    if (flag == NfcSettingsAdapter.FLAG_OFF) {
-                        modeBitmap &= ~0xC;
-                    } else {
-                        modeBitmap |= 0xC;
-                    }
-                }
-            }
-
-            if ((mode & NfcSettingsAdapter.MODE_HCE) != 0) {
-                if (!pm.hasSystemFeature(PackageManager.FEATURE_NFC_HOST_CARD_EMULATION)) {
-                    Log.w(TAG, "setModeFlag() - HCE requested but feature unavailable");
-                } else {
-                    mPrefsEditor.putInt(PREF_MODE_HCE, flag);
-                    mPrefsEditor.apply();
-
-                    if (flag == NfcSettingsAdapter.FLAG_OFF) {
-                        modeBitmap &= ~0x2;
-                    } else {
-                        modeBitmap |= 0x2;
-                    }
-                }
-            }
-
-            Log.d(TAG, "setModeFlag() - modeBitmap = " + Integer.toHexString(modeBitmap));
-
-            if (isNfcEnabled) {
-                Log.d(TAG, "setModeFlag() - Ready for ApplyPollingLoopThread");
-
-                mStExtensions.setRfConfiguration(modeBitmap, techArray);
-            }
-        }
     }
 }

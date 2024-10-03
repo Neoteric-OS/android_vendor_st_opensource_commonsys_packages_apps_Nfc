@@ -1,4 +1,21 @@
+/*
+ * Copyright (C) 2018 ST Microelectronics S.A.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 package com.android.nfcstm;
+
+import static android.view.WindowManager.LayoutParams.SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -28,6 +45,7 @@ public class ConfirmConnectToWifiNetworkActivity extends Activity
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
+        getWindow().addSystemFlags(SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS);
         Intent intent = getIntent();
         mCurrentWifiConfiguration =
                 intent.getParcelableExtra(NfcWifiProtectedSetup.EXTRA_WIFI_CONFIG);
@@ -42,7 +60,7 @@ public class ConfirmConnectToWifiNetworkActivity extends Activity
                                                 .getString(R.string.prompt_connect_to_network),
                                         printableSsid))
                         .setOnDismissListener(this)
-                        .setNegativeButton(com.android.internal.R.string.cancel, null)
+                        .setNegativeButton(R.string.cancel, null)
                         .setPositiveButton(R.string.wifi_connect, null)
                         .create();
 

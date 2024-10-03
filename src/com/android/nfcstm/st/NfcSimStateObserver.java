@@ -1,3 +1,18 @@
+/*
+ * Copyright (C) 2018 ST Microelectronics S.A.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 package com.android.nfcstm.st;
 
 import android.content.BroadcastReceiver;
@@ -10,11 +25,9 @@ import android.os.SystemProperties;
 import android.provider.Settings;
 import android.telephony.TelephonyManager;
 import android.util.Log;
+
 import com.android.internal.telephony.IccCardConstants;
 import com.android.internal.telephony.TelephonyIntents;
-
-// import com.android.internal.telephony.PhoneConstants;
-// import com.mediatek.nfc.porting.*;
 
 public class NfcSimStateObserver extends BroadcastReceiver {
     private static final String TAG = "NfcSimStateObserver";
@@ -22,8 +35,8 @@ public class NfcSimStateObserver extends BroadcastReceiver {
     private Context mContext;
     // private Handler mHandler;
 
-    static final int MSG_SIM1_ABSENT = 0;
-    static final int MSG_SIM2_ABSENT = 1;
+    static final int MSG_SIM1_DISABLED = 0;
+    static final int MSG_SIM2_DISABLED = 1;
     private NfcSimStateObserverHandler mHandler = new NfcSimStateObserverHandler();
 
     // private IntentFilter mFilter;
@@ -47,6 +60,7 @@ public class NfcSimStateObserver extends BroadcastReceiver {
 
     private static NfcSimStateObserver mSingleton;
     private SimEventListener mSimListener;
+
     // private SdCardEventListener mSdCardListener;
 
     /*
@@ -63,6 +77,9 @@ public class NfcSimStateObserver extends BroadcastReceiver {
 
             qc:eject SIM: ABSENT
             qc:insert SIM: (NOT_READY -> LOCKED ->) NOT_READY -> READY -> LOADED
+
+        user disables SIM in settings ==> NOT_READY  (still updates to ABSENT when ejected)
+            by default, considered disabled as present. Can overwrite with persist.st_nfc_disable_swp_for_disabled_sim=1
     */
 
     private int convertTelephonyState(int telephonyState) {
@@ -153,18 +170,38 @@ public class NfcSimStateObserver extends BroadcastReceiver {
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what) {
-                case MSG_SIM1_ABSENT:
-                    Log.d(
-                            TAG,
-                            "NfcSimStateObserverHandler - Timeout waiting for SIM1 state update, consider present");
-                    getInstance().updateSimState(0, STATE_PRESENT_READY);
+                case MSG_SIM1_DISABLED:
+                    if (SystemProperties.get("persist.st_nfc_disable_swp_for_disabled_sim")
+                            .equals("1")) {
+                        Log.d(
+                                TAG,
+                                "NfcSimStateObserverHandler - Timeout waiting for SIM1 state"
+                                        + " update, consider absent");
+                        getInstance().updateSimState(0, STATE_ABSENT);
+                    } else {
+                        Log.d(
+                                TAG,
+                                "NfcSimStateObserverHandler - Timeout waiting for SIM1 state"
+                                        + " update, consider present");
+                        getInstance().updateSimState(0, STATE_PRESENT_READY);
+                    }
                     break;
 
-                case MSG_SIM2_ABSENT:
-                    Log.d(
-                            TAG,
-                            "NfcSimStateObserverHandler - Timeout waiting for SIM2 state update, consider present");
-                    getInstance().updateSimState(1, STATE_PRESENT_READY);
+                case MSG_SIM2_DISABLED:
+                    if (SystemProperties.get("persist.st_nfc_disable_swp_for_disabled_sim")
+                            .equals("1")) {
+                        Log.d(
+                                TAG,
+                                "NfcSimStateObserverHandler - Timeout waiting for SIM2 state"
+                                        + " update, consider absent");
+                        getInstance().updateSimState(1, STATE_ABSENT);
+                    } else {
+                        Log.d(
+                                TAG,
+                                "NfcSimStateObserverHandler - Timeout waiting for SIM2 state"
+                                        + " update, consider present");
+                        getInstance().updateSimState(1, STATE_PRESENT_READY);
+                    }
                     break;
 
                 default:
@@ -178,7 +215,7 @@ public class NfcSimStateObserver extends BroadcastReceiver {
         NfcSimStateObserver instance = getInstance();
         int prevState = STATE_UNKNOWN;
         int prevPending = PENDING_NONE;
-        int msg = (simId == 0 ? MSG_SIM1_ABSENT : MSG_SIM2_ABSENT);
+        int msg = (simId == 0 ? MSG_SIM1_DISABLED : MSG_SIM2_DISABLED);
         instance.mHandler.removeMessages(msg);
         if (newState == STATE_UNKNOWN) {
             // If no new intent after NOT_READY, consider the SIM is absent after 5 seconds
