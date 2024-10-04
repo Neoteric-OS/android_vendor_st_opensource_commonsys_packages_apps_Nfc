@@ -686,6 +686,7 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                         proto,
                         PreferredServicesProto.FOREGROUND_CURRENT);
             }
+/* ++ temporary comment for Pakala r16.1
             if (mWalletRoleObserver.isWalletRoleFeatureEnabled()) {
                 if (mDefaultWalletHolderPaymentService != null) {
                     Utils.dumpDebugComponentName(
@@ -694,6 +695,7 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                             PreferredServicesProto.WALLET_ROLE_HOLDER_PAYMENT_SERVICE);
                 }
             }
+-- */
             if (mNextTapDefault != null) {
                 Utils.dumpDebugComponentName(
                         mNextTapDefault, proto, PreferredServicesProto.NEXT_TAP_DEFAULT);

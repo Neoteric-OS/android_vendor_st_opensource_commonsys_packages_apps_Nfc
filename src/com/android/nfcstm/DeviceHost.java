@@ -117,7 +117,7 @@ public interface DeviceHost {
 
         public void onCeApduData(byte[] data);
 
-       /** Notifies TZ Secure Zone Notification **/
+        /** Notifies TZ Secure Zone Notification **/
         public void onTZNfcSecureZoneReported();
     }
 

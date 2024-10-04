@@ -85,44 +85,6 @@ android_app {
     ],
 }
 
-// NCI Configuration embedded in NFC apex.
-// This version compiles against SDK API's.
-android_app {
-    name: "Nfc_StApex",
-    defaults: ["Nfc_StDefaults"],
-    min_sdk_version: "current",
-    sdk_version: "module_current",
-    certificate: "nfc",
-    srcs: [
-        ":st-nfc-sources",
-        "shim_src/apex/**/*.java",
-    ],
-
-    libs: [
-        "framework-annotations-lib",
-        "framework-bluetooth",
-        "framework-configinfrastructure",
-        "framework-nfc.impl",
-        "framework-permission-s",
-        "framework-permission",
-        "framework-statsd.stubs.module_lib",
-        "framework-wifi",
-        "android.nfc.flags-aconfig-java",
-        "android.permission.flags-aconfig-java-export",
-        "android.service.chooser.flags-aconfig-java",
-        "unsupportedappusage",
-    ],
-    // prevent NfcNciApex from using product-specific resources
-    aaptflags: ["--product default"],
-    apex_available: [
-        "//apex_available:platform",
-        "com.android.nfcstmservices",
-    ],
-    lint: {
-        baseline_filename: "lint-baseline.xml",
-    },
-}
-
 filegroup {
     name: "st-nfc-sources",
     srcs: [

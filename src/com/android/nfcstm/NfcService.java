@@ -191,6 +191,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
@@ -905,7 +906,8 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
             new EnableDisableTask().execute(TASK_ENABLE);
         }
     }
-   /** TZ Secure Zone Notification to Disable NFC **/
+
+    /** TZ Secure Zone Notification to Disable NFC **/
     @Override
     public void onTZNfcSecureZoneReported() {
         if (DBG) Log.d(TAG, "onTZNfcSecureZoneReported() - Disbaling NFC Service");
@@ -2702,6 +2704,10 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
             new EnableDisableTask().execute(TASK_DISABLE);
 
             return true;
+        }
+
+        public IBinder getNfcAdapterVendorInterface(String vendor) {
+            return null;
         }
 
         @Override
