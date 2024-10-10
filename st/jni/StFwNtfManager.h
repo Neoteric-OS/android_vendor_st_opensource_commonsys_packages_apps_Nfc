@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013 ST Microelectronics S.A.
+ *  Copyright (C) 2023 ST Microelectronics S.A.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -47,6 +47,7 @@ class StFwNtfManager {
   void actionNtfEnable(bool enable);
   void intfActivatedNtfEnable(bool enable);
   void notifyIntfActivatedEvent(uint8_t len, uint8_t* pdata);
+  void ceApduDataEnable(bool enable);
 
  private:
 #define DYN_SST_IDLE 0
@@ -82,6 +83,8 @@ class StFwNtfManager {
   bool mSendIntfActivatedNtfToUpper;
   bool mDynEnabled;
   bool mSendVsLogDataToUpper;
+  bool mSendCeApduDataToUpper;
+
   int mDynFwErr;
   int mDynRotated;
   uint32_t mDynFwTsT1Started;  // FW time reference for T1
@@ -94,6 +97,9 @@ class StFwNtfManager {
   int mMatchSelectState;
   uint32_t mMatchSelectLastFieldOffTs;
   uint8_t mMatchSelectPartialLastChainedByte;
+  int mCeApduMatchState;
+  uint8_t mCeApduMatchPartialLastChainedByte;
+
   // Variables for sending 1st Rx and
   // parameters rotation to service
   // only once between a field on and off, unless the values change
@@ -118,9 +124,11 @@ class StFwNtfManager {
   // - discovery stopped
   // - unregistering, need to stop.
   // The thread manages the transitions of the state machine.
-  uint32_t mRPLLastFieldOnTs;    // FW time reference
-  uint32_t mRPLLastFieldOffTs;   // FW time reference
-  uint32_t mRPLLastDiscoStopTs;  // FW time reference
+  uint32_t mRPLLastFieldOnTs;             // FW time reference
+  uint32_t mRPLLastFieldOffTs;            // FW time reference
+  uint32_t mRPLLastDiscoStopTs;           // FW time reference
+  struct timespec mRPLLastDiscoStopReal;  // FW time reference
+
   // state machine of the algorithm
   int mRPLState;
   bool mRPLUnregistering;
@@ -181,13 +189,16 @@ class StFwNtfManager {
                       bool last);
   void handlePollingLoopData(uint8_t format, uint16_t data_len, uint8_t* p_data,
                              bool last);
-  int fwTsDiffToMs(uint32_t fwtsstart, uint32_t fwtsend);
-  int fwTsDiffToUs(uint32_t fwtsstart, uint32_t fwtsend);
+  int fwTsDiffToMs(uint8_t format, uint32_t fwtsstart, uint32_t fwtsend);
+  int fwTsDiffToUs(uint8_t format, uint32_t fwtsstart, uint32_t fwtsend);
   void matchSendTriggerPayload(uint8_t nfcee, uint8_t* buf, int len);
   void matchGotLogPartialAid(uint8_t* aidBeg, int aidBegLen, uint8_t* aidEnd,
                              int aidEndLen, int fullLen);
   void matchGotLogSw(bool rematch, uint8_t sw1, uint8_t sw2);
   void matchPurgeActionAid(int num, bool skipLast);
-  void rplAddOneEventLocked(char type, uint8_t gain, uint32_t ts);
+  void rplAddOneEventLocked(uint8_t format, char type, uint8_t gain,
+                            uint32_t ts);
   void matchStoreActionAid(uint8_t nfcee, uint8_t* aid, int len);
+  void matchCeApduData(uint8_t format, uint16_t data_len, uint8_t* p_data,
+                       bool last);
 };

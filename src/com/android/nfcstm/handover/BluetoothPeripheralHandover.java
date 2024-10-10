@@ -40,6 +40,7 @@ import android.sysprop.NfcProperties;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.widget.Toast;
+
 import com.android.nfcstm.R;
 
 /**
@@ -52,7 +53,7 @@ import com.android.nfcstm.R;
  */
 public class BluetoothPeripheralHandover implements BluetoothProfile.ServiceListener {
     static final String TAG = "BluetoothPeripheralHandover";
-    static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
+    static final boolean DBG = NfcProperties.debug_enabled().orElse(true);
 
     static final String ACTION_ALLOW_CONNECT = "com.android.nfcstm.handover.action.ALLOW_CONNECT";
     static final String ACTION_DENY_CONNECT = "com.android.nfcstm.handover.action.DENY_CONNECT";
