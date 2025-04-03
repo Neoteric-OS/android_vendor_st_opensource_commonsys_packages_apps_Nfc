@@ -277,16 +277,6 @@ public class HostEmulationManager {
     @TargetApi(35)
     @FlaggedApi(android.nfc.Flags.FLAG_NFC_OBSERVE_MODE)
     public void updateForShouldDefaultToObserveMode(boolean enabled) {
-        final Runnable hostEmulationRun =
-                new HostEmulationRunnable(RUN_EVENT_CE_OBS_MODE, (Object) enabled);
-        mHostEmulationScheduledTask =
-                mHostEmulationScheduler.schedule(hostEmulationRun, 0, TimeUnit.MILLISECONDS);
-    }
-
-    @TargetApi(35)
-    @FlaggedApi(android.nfc.Flags.FLAG_NFC_OBSERVE_MODE)
-    public void shouldDefaultToObserveMode(boolean enabled) {
-        Log.d(TAG, "shouldDefaultToObserveMode() - enabled: " + enabled);
         synchronized (mLock) {
             if (!isHostCardEmulationActivated()) {
                 NfcAdapter adapter = NfcAdapter.getDefaultAdapter(mContext);
@@ -1506,7 +1496,6 @@ public class HostEmulationManager {
     final int RUN_EVENT_CE_DATA = 1;
     final int RUN_EVENT_CE_DEACTIVATED = 2;
     final int RUN_EVENT_CE_FIELD_EVT = 3;
-    final int RUN_EVENT_CE_OBS_MODE = 4;
 
     private class HostEmulationRunnable implements Runnable {
         private int mCbType;
@@ -1521,9 +1510,6 @@ public class HostEmulationManager {
                     break;
                 case RUN_EVENT_CE_FIELD_EVT:
                     mFieldStatus = (boolean) param1;
-                    break;
-                case RUN_EVENT_CE_OBS_MODE:
-                    mObsModeStatus = (boolean) param1;
                     break;
                 default:
                     break;
@@ -1548,10 +1534,6 @@ public class HostEmulationManager {
                 case RUN_EVENT_CE_FIELD_EVT:
                     Log.d(TAG, "HostEmulationRunnable.run(RUN_EVENT_CE_FIELD_EVT)");
                     fieldChangeDetected(mFieldStatus);
-                    break;
-                case RUN_EVENT_CE_OBS_MODE:
-                    Log.d(TAG, "HostEmulationRunnable.run(RUN_EVENT_CE_OBS_MODE)");
-                    shouldDefaultToObserveMode(mObsModeStatus);
                     break;
             }
         }
