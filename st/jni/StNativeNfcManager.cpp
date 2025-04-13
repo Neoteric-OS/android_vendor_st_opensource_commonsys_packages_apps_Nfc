@@ -1326,6 +1326,9 @@ static jboolean stNfcManager_initNativeStruc(JNIEnv* e, jobject o) {
   gCachedNfcManagerNotifyCeApduData =
       e->GetMethodID(cls.get(), "notifyCeApduData", "([B)V");
 
+  gCachedNfcManagerNotifyTZNfcSecureZoneReported =
+      e->GetMethodID(cls.get(), "notifyTZNfcSecureZoneReported", "()V");
+
   LOG(DEBUG) << StringPrintf("%s: exit", __func__);
   return JNI_TRUE;
 }
